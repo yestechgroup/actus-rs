@@ -228,6 +228,15 @@ export function parseIsoPeriodDays(raw: string | undefined | null): number | nul
   return matched === raw.trim().length ? total : null;
 }
 
+/** Epoch ms of UTC midnight of the day in an `YYYY-MM-DD[THH:MM:SS]`
+ * timestamp. Deliberately ignores the time-of-day and the browser timezone:
+ * calendar day keys must match `Date.UTC(y, m, d)` exactly, or lookups miss
+ * for any user not in UTC (Date.parse would apply the local offset). */
+function utcDayKey(dateText: string): number {
+  const [y, m, d] = dateText.slice(0, 10).split('-').map(Number);
+  return Date.UTC(y, m - 1, d);
+}
+
 /** The calendar schedule view (mirrors `calendar_view` in state.rs). */
 export function buildCalendar(events: EventDto[], graceDays: number | null): CalendarView {
   if (!events.length) {
@@ -236,7 +245,7 @@ export function buildCalendar(events: EventDto[], graceDays: number | null): Cal
   const DAY_MS = 86_400_000;
   const byDate = new Map<number, EventDto[]>();
   for (const event of events) {
-    const t = timestampMs(event.eventDate);
+    const t = utcDayKey(event.eventDate);
     const list = byDate.get(t) ?? [];
     list.push(event);
     byDate.set(t, list);
