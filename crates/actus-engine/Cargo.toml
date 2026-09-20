@@ -1,0 +1,18 @@
+[package]
+name = "actus-engine"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/yestechgroup/actus-rs"
+description = "ACTUS algorithmic engine: schedule generation, state transitions, payoff functions"
+
+[dependencies]
+actus-model = { path = "../actus-model" }
+chrono = { workspace = true }
+rust_decimal = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+rust_decimal_macros = "1"
+serde_json = { workspace = true }

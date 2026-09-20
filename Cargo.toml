@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/actus-model",
+    "crates/actus-engine",
+    "crates/actus-conformance",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/yestechgroup/actus-rs"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+rust_decimal = { version = "1", features = ["serde"] }
+thiserror = "2"
+proptest = "1"

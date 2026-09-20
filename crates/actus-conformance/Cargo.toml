@@ -1,0 +1,25 @@
+[package]
+name = "actus-conformance"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/yestechgroup/actus-rs"
+description = "Conformance harness running the official ACTUS testbeds against the Rust engine"
+
+[dependencies]
+actus-model = { path = "../actus-model" }
+actus-engine = { path = "../actus-engine" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+rust_decimal = { workspace = true }
+
+[package.metadata.actus]
+dictionary_version = "1.4"
+dictionary_commit = "356f7663f26091105cc4fef4ae3496942dcf0ebf"
+tests_commit = "f7a8064872b69db1f0beabac771c99dc3ce0c397"
+techspecs_commit = "94ef09e4992f79d573f84f41d8480f557365870e"
+
+[[bin]]
+name = "report"
+path = "src/bin/report.rs"
