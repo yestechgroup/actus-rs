@@ -1,0 +1,18 @@
+{
+  "name": "actus-explorer-assets",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "WebUI frontend assets of the ACTUS Explorer (templates, styles, client TypeScript)",
+  "scripts": {
+    "bundle": "esbuild src/index.ts --bundle --format=esm --target=es2022 --outfile=../dist/index.js --external:/pkg/*",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@microsoft/webui-framework": "0.0.29"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "typescript": "~5.9.3"
+  }
+}

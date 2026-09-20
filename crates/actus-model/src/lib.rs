@@ -11,6 +11,9 @@
 //!   objects (camelCase keys, decimal/date/cycle coercion).
 //! - [`builders`] — applicability-enforcing typed builders
 //!   (`PamBuilder`, `LamBuilder`, `NamBuilder`, `AnnBuilder`).
+//! - [`metadata`] — serde-serializable metadata views (contract type
+//!   taxonomy, applicability tables, labelled attribute dictionary) for
+//!   UI clients.
 //! - [`cycle`], [`enums`], [`error`], [`serde_helpers`], [`source`] —
 //!   supporting hand-written model pieces.
 //!
@@ -25,6 +28,7 @@ pub mod cycle;
 pub mod enums;
 pub mod error;
 pub mod generated;
+pub mod metadata;
 pub mod serde_helpers;
 pub mod source;
 pub mod terms;
@@ -41,4 +45,5 @@ pub use generated::applicability::{self, Applicability};
 pub use generated::attribute::{self, Attribute, AttributeType};
 pub use generated::contract_type::{self, ContractType};
 pub use generated::event_type::{self, EventType};
+pub use metadata::{ApplicabilityInfo, AttributeInfo, ContractTypeInfo};
 pub use terms::{ContractReference, ContractTerms};

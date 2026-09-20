@@ -1,0 +1,19 @@
+[package]
+name = "actus-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "WebAssembly bindings exposing ACTUS metadata, validation and evaluation to browser clients"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+rust_decimal = { workspace = true }
+actus-model = { path = "../actus-model" }
+actus-engine = { path = "../actus-engine" }

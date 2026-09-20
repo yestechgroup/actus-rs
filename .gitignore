@@ -1,2 +1,4 @@
 /target
 Cargo.lock.bak
+crates/actus-wasm/pkg
+crates/actus-wasm/target

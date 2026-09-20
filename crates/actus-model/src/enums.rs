@@ -238,6 +238,50 @@ actus_enum! {
 }
 
 actus_enum! {
+    /// ACTUS attribute `ARINCDEC` — Array Increase Decrease (dictionary
+    /// `arrayIncreaseDecrease`, type `Enum[]`). Element `i` states whether
+    /// the `i`-th principal-redemption segment of an array-scheduled
+    /// maturity contract (`ANX`, `NAX`, `LAX`) increases or decreases the
+    /// notional (paper §7.3).
+    pub enum ArrayIncDec {
+        /// `INC` — the notional is increased in this period.
+        Inc => "INC",
+        /// `DEC` — the notional is decreased in this period.
+        Dec => "DEC",
+    }
+}
+
+actus_enum! {
+    /// ACTUS attribute `ARFIXVAR` — Array Fixed Variable (dictionary
+    /// `arrayFixedVariable`). Defines the meaning of the `ARRATE`
+    /// (`arrayRate`) elements of an array-type rate reset schedule. The
+    /// allowedValues acronyms are `F`/`V`; the dictionary description spells
+    /// them `FIX`/`VAR`, so both spellings deserialize and the acronym is
+    /// displayed.
+    pub enum ArrayFixVar {
+        /// `F` — `arrayRate` carries the fixed nominal interest rate
+        /// (corresponding to `IPNR`).
+        #[serde(alias = "FIX")]
+        Fixed => "F",
+        /// `V` — `arrayRate` carries the spread on top of the reference
+        /// rate (corresponding to `RRSP`).
+        #[serde(alias = "VAR")]
+        Variable => "V",
+    }
+}
+
+actus_enum! {
+    /// ACTUS attribute `FEB` — Fee Basis (dictionary `feeBasis`): how the
+    /// fee rate `FER` is interpreted when fee events (`FP`) are paid.
+    pub enum FeeBasis {
+        /// `A` — the fee rate represents an absolute value.
+        AbsoluteValue => "A",
+        /// `N` — the fee rate applies to the nominal value.
+        NominalValue => "N",
+    }
+}
+
+actus_enum! {
     /// ACTUS attribute `CETC` — Credit Event Type Covered (dictionary
     /// `creditEventTypeCovered`, type `Enum[]`; the testbeds carry a single
     /// token). Which contract performance state of the covered contracts
@@ -263,6 +307,80 @@ actus_enum! {
         NominalValuePlusInterest => "NI",
         /// `MV` — market value of the exposure is covered.
         MarketValue => "MV",
+    }
+}
+
+actus_enum! {
+    /// ACTUS attribute `OPTP` — Option Type (dictionary `optionType`): the
+    /// direction of the option right. Combined with `CNTRL`, which defines
+    /// whether the creator is the buyer or the seller of the right.
+    pub enum OptionType {
+        /// `C` — call option.
+        Call => "C",
+        /// `P` — put option.
+        Put => "P",
+        /// `CP` — combination of call and put option.
+        CallPut => "CP",
+    }
+}
+
+actus_enum! {
+    /// ACTUS attribute `OPXT` — Option Exercise Type (dictionary
+    /// `optionExerciseType`): the exercise style of an option.
+    pub enum OptionExerciseType {
+        /// `E` — European-type exercise (at a specific date).
+        European => "E",
+        /// `B` — Bermudan-type exercise (at certain points during a span
+        /// of time).
+        Bermudan => "B",
+        /// `A` — American-type exercise (during a span of time).
+        American => "A",
+    }
+}
+
+actus_enum! {
+    /// ACTUS attribute `PPEF` — Prepayment Effect (dictionary
+    /// `prepaymentEffect`): whether the prepayment right exists and how a
+    /// prepayment affects the remaining principal redemption schedule.
+    pub enum PrepaymentEffect {
+        /// `N` — prepayment is not allowed under the agreement.
+        NoPrepayment => "N",
+        /// `A` — prepayment reduces the redemption amount for the remaining
+        /// period up to maturity.
+        ReducesRedemptionAmount => "A",
+        /// `M` — prepayment reduces the maturity.
+        ReducesMaturity => "M",
+    }
+}
+
+actus_enum! {
+    /// ACTUS attribute `PYTP` — Penalty Type (dictionary `penaltyType`):
+    /// which penalty applies to a prepayment. The dictionary `defaultValue`
+    /// column carries the stray token `O` that its own `allowedValues` do
+    /// not define; the four defined acronyms are modelled here.
+    pub enum PenaltyType {
+        /// `N` — no penalty applies.
+        NoPenalty => "N",
+        /// `A` — a fixed amount applies as penalty.
+        FixedPenalty => "A",
+        /// `R` — a penalty relative to the notional outstanding applies.
+        RelativePenalty => "R",
+        /// `I` — a penalty based on the current interest rate differential
+        /// relative to the notional outstanding applies.
+        InterestRateDifferential => "I",
+    }
+}
+
+actus_enum! {
+    /// ACTUS attributes `IPPNT` — Cycle Point Of Interest Payment and
+    /// `RRPNT` — Cycle Point Of Rate Reset (dictionary `cyclePoint`
+    /// codelist): whether the cyclic payment respectively rate applies at
+    /// the beginning or the end of its cycle.
+    pub enum CyclePoint {
+        /// `B` — the value applies at the beginning of the cycle.
+        Beginning => "B",
+        /// `E` — the value applies at the end of the cycle.
+        End => "E",
     }
 }
 
@@ -351,5 +469,39 @@ mod tests {
             InterestCalculationBase::from_str("NTIED").unwrap(),
             InterestCalculationBase::Ntied
         );
+    }
+
+    #[test]
+    fn array_increase_decrease_tokens() {
+        assert_eq!(ArrayIncDec::from_str("INC").unwrap(), ArrayIncDec::Inc);
+        assert_eq!(ArrayIncDec::from_str("DEC").unwrap(), ArrayIncDec::Dec);
+        assert_eq!(
+            serde_json::from_value::<ArrayIncDec>(serde_json::json!("DEC")).unwrap(),
+            ArrayIncDec::Dec
+        );
+        assert_eq!(
+            serde_json::to_value(ArrayIncDec::Inc).unwrap(),
+            serde_json::json!("INC")
+        );
+        assert!(ArrayIncDec::from_str("INCDEC").is_err());
+    }
+
+    #[test]
+    fn array_fixed_variable_accepts_acronym_and_description_spellings() {
+        assert_eq!(ArrayFixVar::from_str("F").unwrap(), ArrayFixVar::Fixed);
+        assert_eq!(ArrayFixVar::from_str("V").unwrap(), ArrayFixVar::Variable);
+        assert_eq!(
+            serde_json::from_value::<ArrayFixVar>(serde_json::json!("FIX")).unwrap(),
+            ArrayFixVar::Fixed
+        );
+        assert_eq!(
+            serde_json::from_value::<ArrayFixVar>(serde_json::json!("VAR")).unwrap(),
+            ArrayFixVar::Variable
+        );
+        assert_eq!(
+            serde_json::to_value(ArrayFixVar::Variable).unwrap(),
+            serde_json::json!("V")
+        );
+        assert!(ArrayFixVar::from_str("X").is_err());
     }
 }

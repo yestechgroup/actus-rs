@@ -259,3 +259,116 @@ pub mod timestamp_option {
 pub fn decimal_to_string(value: &Decimal) -> String {
     value.to_string()
 }
+
+/// Deserialize `Option<Vec<NaiveDateTime>>` from a JSON array of ACTUS
+/// timestamp strings or null; serialize back to the canonical
+/// second-precision strings. Array-valued attributes (`ARIPANX`, `ARPRANX`,
+/// `ARRRANX`) use this helper.
+pub mod timestamp_vec_option {
+    use super::*;
+    use serde::de::Error as DeError;
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Vec<NaiveDateTime>>, D::Error> {
+        struct TimestampVecOptionVisitor;
+
+        impl<'de> Visitor<'de> for TimestampVecOptionVisitor {
+            type Value = Option<Vec<NaiveDateTime>>;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "an array of ACTUS timestamps or null")
+            }
+
+            fn visit_seq<S>(self, mut seq: S) -> Result<Option<Vec<NaiveDateTime>>, S::Error>
+            where
+                S: serde::de::SeqAccess<'de>,
+            {
+                let mut out = Vec::new();
+                while let Some(raw) = seq.next_element::<String>()? {
+                    let timestamp = parse_timestamp(&raw).map_err(|_| {
+                        DeError::invalid_value(Unexpected::Str(&raw), &"an ISO 8601 timestamp")
+                    })?;
+                    out.push(timestamp);
+                }
+                Ok(Some(out))
+            }
+
+            fn visit_unit<E: DeError>(self) -> Result<Option<Vec<NaiveDateTime>>, E> {
+                Ok(None)
+            }
+
+            fn visit_none<E: DeError>(self) -> Result<Option<Vec<NaiveDateTime>>, E> {
+                Ok(None)
+            }
+        }
+
+        deserializer.deserialize_any(TimestampVecOptionVisitor)
+    }
+
+    pub fn serialize<S: Serializer>(
+        value: &Option<Vec<NaiveDateTime>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(v) => serializer.collect_seq(v.iter().map(timestamp_to_string)),
+            None => serializer.serialize_none(),
+        }
+    }
+}
+
+/// Deserialize `Option<Vec<Decimal>>` from a JSON array of ACTUS decimals
+/// (strings, numbers or null elements) or null; serialize back to decimal
+/// strings. Array-valued attributes (`ARPRNXT`, `ARRATE`) use this helper.
+pub mod decimal_vec_option {
+    use super::*;
+    use serde::de::Error as DeError;
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Vec<Decimal>>, D::Error> {
+        struct DecimalVecOptionVisitor;
+
+        impl<'de> Visitor<'de> for DecimalVecOptionVisitor {
+            type Value = Option<Vec<Decimal>>;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "an array of ACTUS decimals or null")
+            }
+
+            fn visit_seq<S>(self, mut seq: S) -> Result<Option<Vec<Decimal>>, S::Error>
+            where
+                S: serde::de::SeqAccess<'de>,
+            {
+                let mut out = Vec::new();
+                while let Some(raw) = seq.next_element::<serde_json::Value>()? {
+                    match decimal_from_value(&raw) {
+                        Ok(value) => out.extend(value),
+                        Err(e) => return Err(DeError::custom(e.to_string())),
+                    }
+                }
+                Ok(Some(out))
+            }
+
+            fn visit_unit<E: DeError>(self) -> Result<Option<Vec<Decimal>>, E> {
+                Ok(None)
+            }
+
+            fn visit_none<E: DeError>(self) -> Result<Option<Vec<Decimal>>, E> {
+                Ok(None)
+            }
+        }
+
+        deserializer.deserialize_any(DecimalVecOptionVisitor)
+    }
+
+    pub fn serialize<S: Serializer>(
+        value: &Option<Vec<Decimal>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(v) => serializer.collect_seq(v.iter().map(|d| d.to_string())),
+            None => serializer.serialize_none(),
+        }
+    }
+}

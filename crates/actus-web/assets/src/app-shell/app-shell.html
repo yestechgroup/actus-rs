@@ -1,0 +1,487 @@
+<template>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-mark">A</div>
+        <div>
+          <h1 class="brand-title">{{title}}</h1>
+          <p class="brand-sub">{{tagline}}</p>
+        </div>
+      </div>
+
+      <div class="sidebar-search">
+        <input
+          type="search"
+          placeholder="Search contracts..."
+          value="{{search}}"
+          @input="{onSearch(e)}"
+        />
+      </div>
+
+      <nav class="contract-list">
+        <for each="group in sidebarGroups">
+          <if condition="group.types.length">
+            <div class="group-header">{{group.name}}</div>
+            <for each="c in group.types">
+              <button
+                class="contract-card"
+                ?data-active="{{c.acronym == selectedAcronym}}"
+                @click="{selectContract(c.acronym)}"
+              >
+                <span class="card-row">
+                  <span class="card-dot" ?data-pending="{{!c.hasEngine}}"></span>
+                  <span class="card-code">{{c.acronym}}</span>
+                  <span class="card-name">{{c.name}}</span>
+                </span>
+                <span class="card-desc">{{c.description}}</span>
+                <if condition="!c.hasEngine">
+                  <span class="engine-tag">engine pending</span>
+                </if>
+              </button>
+            </for>
+          </if>
+        </for>
+        <if condition="!filteredCount">
+          <p class="empty-note">No contracts match this search.</p>
+        </if>
+      </nav>
+
+      <div class="sidebar-footer">
+        <span class="status-dot" ?data-ready="{{wasmReady}}"></span>
+        <span>{{versionLabel}} &middot; {{engineLabel}}</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="content">
+        <header class="header">
+          <div class="header-badge">{{selected.acronym}}</div>
+          <div class="header-text">
+            <h2 class="header-title">{{selected.name}}</h2>
+            <p class="header-sub">
+              <span class="badge" data-tone="{{selected.category}}">{{selected.category}}</span>
+              <span class="dim">ACTUS Contract Type</span>
+            </p>
+            <p class="header-desc">{{selected.description}}</p>
+          </div>
+        </header>
+
+        <section class="stats">
+          <if condition="selected.stats.hasCards">
+            <for each="card in selected.stats.cards">
+              <div class="stat-card">
+                <div class="stat-label">{{card.label}}</div>
+                <div class="stat-value" data-tone="{{card.tone}}">{{card.value}}</div>
+              </div>
+            </for>
+          </if>
+          <if condition="!selected.stats.hasCards">
+            <div class="stat-card"><div class="stat-label">Schedule</div><div class="stat-value dim">&mdash;</div></div>
+            <div class="stat-card"><div class="stat-label">Events</div><div class="stat-value dim">0</div></div>
+            <div class="stat-card"><div class="stat-label">Total Interest</div><div class="stat-value dim">&mdash;</div></div>
+            <div class="stat-card"><div class="stat-label">Final Notional</div><div class="stat-value dim">&mdash;</div></div>
+          </if>
+        </section>
+
+        <if condition="selected.engineNotice">
+          <div class="notice" data-warn>{{selected.engineNotice}}</div>
+        </if>
+
+        <if condition="selected.hasEvaluationError">
+          <div class="notice" data-error>
+            <strong>Schedule evaluation failed.</strong> {{selected.evaluationError}}
+            <span class="dim">&mdash; open the JSON debug panel below to inspect or copy the exact inputs.</span>
+          </div>
+        </if>
+
+        <section class="panel main-panel">
+          <div class="main-tabs" role="tablist">
+            <button role="tab" ?data-selected="{{mainView == 'timeline'}}" @click="{setMainView('timeline')}">Event Timeline</button>
+            <button role="tab" ?data-selected="{{mainView == 'cashflow'}}" @click="{setMainView('cashflow')}">Cash Flow Distribution</button>
+            <button role="tab" ?data-selected="{{mainView == 'schedule'}}" @click="{setMainView('schedule')}">Event Schedule</button>
+          </div>
+
+          <if condition="mainView == 'timeline'">
+            <div class="tab-toolbar">
+              <div class="legend">
+                <span class="legend-item"><span class="legend-dot" data-kind="ied"></span>IED</span>
+                <span class="legend-item"><span class="legend-dot" data-kind="ip"></span>IP</span>
+                <span class="legend-item"><span class="legend-dot" data-kind="pr"></span>PR</span>
+                <span class="legend-item"><span class="legend-dot" data-kind="md"></span>MD</span>
+                <span class="legend-item"><span class="legend-dot" data-kind="other"></span>Other</span>
+              </div>
+              <span class="mono dim">{{selected.eventCount}} events &middot; scroll horizontally on long schedules</span>
+            </div>
+
+            <if condition="selected.hasChips">
+              <div class="chips">
+                <for each="chip in selected.chips">
+                  <span class="chip" data-tone="{{chip.tone}}">{{chip.text}}</span>
+                </for>
+              </div>
+            </if>
+
+            <if condition="selected.timeline.hasEvents">
+              <div class="timeline-scroll">
+                <div class="timeline-grid" style="--axis-w: {{selected.timeline.axisMinWidth}}">
+                  <div class="lane-years-spacer"></div>
+                  <div class="lane-track lane-years">
+                    <for each="tick in selected.timeline.yearTicks">
+                      <div class="year-tick" style="--left: {{tick.leftPct}}"><span class="mono">{{tick.label}}</span></div>
+                    </for>
+                  </div>
+                  <for each="lane in selected.timeline.lanes">
+                    <if condition="lane.hasLane">
+                      <div class="lane-label" data-kind="{{lane.key}}">{{lane.label}}</div>
+                      <div class="lane-track" data-kind="{{lane.key}}">
+                        <for each="ev in lane.events">
+                          <div class="event-pin" style="--left: {{ev.leftPct}}" data-kind="{{ev.kind}}">
+                            <button class="event-dot" aria-label="{{ev.eventType}} {{ev.dateText}} {{ev.payoffText}}"></button>
+                            <div class="event-tip" role="tooltip">
+                              <div class="tip-head">
+                                <span class="tip-type" data-kind="{{lane.key}}">{{ev.eventType}}</span>
+                                <span class="dim">{{ev.eventLabel}}</span>
+                              </div>
+                              <div class="mono tip-date">{{ev.dateText}}</div>
+                              <div class="tip-payoff" data-sign="{{ev.sign}}">{{ev.payoffText}}</div>
+                              <div class="dim">Notional: {{ev.notionalText}}</div>
+                            </div>
+                          </div>
+                        </for>
+                      </div>
+                    </if>
+                  </for>
+                </div>
+              </div>
+            </if>
+            <if condition="!selected.timeline.hasEvents">
+              <div class="empty-note">Configure parameters and click <strong>Generate Schedule</strong> to visualize events</div>
+            </if>
+          </if>
+
+          <if condition="mainView == 'cashflow'">
+            <div class="tab-toolbar">
+              <span class="dim">Per-event and cumulative cash flows</span>
+              <div class="tabs">
+                <button ?data-active="{{chartView == 'bar'}}" @click="{setView('bar')}">Bar</button>
+                <button ?data-active="{{chartView == 'line'}}" @click="{setView('line')}">Line</button>
+                <button ?data-active="{{chartView == 'cumulative'}}" @click="{setView('cumulative')}">Cumulative</button>
+              </div>
+            </div>
+
+            <if condition="selected.chart.hasData">
+              <if condition="chartView == 'bar'">
+                <div class="bar-chart">
+                  <for each="tick in selected.chart.yTicks">
+                    <div class="chart-gridline" style="--bottom: {{tick.bottomPct}}"><span>{{tick.label}}</span></div>
+                  </for>
+                  <div class="bar-row">
+                    <for each="bar in selected.chart.bars">
+                      <div class="bar-slot">
+                        <div class="bar" style="--h: {{bar.heightPct}}" data-sign="{{bar.sign}}" title="{{bar.label}}"></div>
+                      </div>
+                    </for>
+                  </div>
+                </div>
+              </if>
+              <if condition="chartView == 'line'">
+                <svg class="line-chart" viewBox="0 0 1000 300" preserveAspectRatio="none" role="img" aria-label="Cash flow line chart">
+                  <polyline data-series="flow" points="{{selected.chart.linePoints}}"></polyline>
+                </svg>
+              </if>
+              <if condition="chartView == 'cumulative'">
+                <svg class="line-chart" viewBox="0 0 1000 300" preserveAspectRatio="none" role="img" aria-label="Cumulative cash flow chart">
+                  <polyline data-series="cumulative" points="{{selected.chart.cumulativePoints}}"></polyline>
+                </svg>
+              </if>
+            </if>
+            <if condition="!selected.chart.hasData">
+              <div class="empty-note">No cash flows generated</div>
+            </if>
+          </if>
+
+          <if condition="mainView == 'schedule'">
+            <div class="tab-toolbar">
+              <div class="legend">
+                <span class="legend-item"><span class="legend-dot" data-kind="ied"></span>IED</span>
+                <span class="legend-item"><span class="legend-dot" data-kind="ip"></span>IP</span>
+                <span class="legend-item"><span class="legend-dot" data-kind="pr"></span>PR</span>
+                <span class="legend-item"><span class="legend-dot" data-kind="md"></span>MD</span>
+                <span class="legend-item"><span class="legend-dot" data-kind="other"></span>Other</span>
+                <span class="legend-item"><span class="legend-swatch" data-grace></span>Grace period</span>
+              </div>
+              <span class="dim">Event days carry their type badge; hatched days are grace windows</span>
+            </div>
+            <if condition="selected.calendar.hasEvents">
+              <if condition="selected.calendar.truncated">
+                <div class="notice" data-warn>{{selected.calendar.notice}}</div>
+              </if>
+              <div class="calendar">
+                <for each="yr in selected.calendar.years">
+                  <div class="cal-year">
+                    <div class="cal-year-label mono">{{yr.label}}</div>
+                    <div class="cal-months">
+                      <for each="m in yr.months">
+                        <div class="cal-month" ?data-active="{{m.hasEvents}}">
+                          <div class="cal-month-label">{{m.label}}</div>
+                          <div class="cal-grid">
+                            <span class="cal-week mono">Mo</span><span class="cal-week mono">Tu</span><span class="cal-week mono">We</span><span class="cal-week mono">Th</span><span class="cal-week mono">Fr</span><span class="cal-week mono">Sa</span><span class="cal-week mono">Su</span>
+                            <for each="c in m.cells">
+                              <if condition="c.blank">
+                                <div class="cal-cell" data-blank></div>
+                              </if>
+                              <if condition="!c.blank">
+                                <div class="cal-cell" ?data-event="{{c.hasEvent}}" ?data-grace="{{c.grace}}" data-kind="{{c.kind}}">
+                                  <span class="cal-day mono">{{c.day}}</span>
+                                  <if condition="c.hasEvent">
+                                    <span class="cal-badges">
+                                      <for each="b in c.badges">
+                                        <span class="cal-badge" data-kind="{{b.kind}}">{{b.type}}</span>
+                                      </for>
+                                      <if condition="c.more">
+                                        <span class="cal-badge" data-more>+{{c.more}}</span>
+                                      </if>
+                                    </span>
+                                    <div class="cal-tip" role="tooltip">
+                                      <div class="mono dim cal-tip-date">{{m.label}} {{c.day}}, {{yr.label}}</div>
+                                      <for each="ln in c.lines">
+                                        <div class="cal-tip-row"><span class="mono">{{ln.eventType}}</span><span class="mono cal-tip-amount">{{ln.payoffText}}</span></div>
+                                      </for>
+                                    </div>
+                                  </if>
+                                </div>
+                              </if>
+                            </for>
+                          </div>
+                        </div>
+                      </for>
+                    </div>
+                  </div>
+                </for>
+              </div>
+            </if>
+            <if condition="!selected.calendar.hasEvents">
+              <div class="empty-note">No events to place on the calendar</div>
+            </if>
+
+            <details class="table-inline">
+              <summary>Exact values &mdash; {{selected.eventCount}} events</summary>
+              <div class="event-table">
+                <if condition="selected.hasEvents">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Date</th><th>Type</th><th>Amount</th><th>Notional</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <for each="ev in selected.events">
+                        <tr>
+                          <td class="mono dim">{{ev.dateText}}</td>
+                          <td><span class="badge" data-kind="{{ev.kind}}">{{ev.eventType}}</span></td>
+                          <td class="mono amount" data-sign="{{ev.sign}}">{{ev.payoffText}}</td>
+                          <td class="mono dim">{{ev.notionalText}}</td>
+                        </tr>
+                      </for>
+                    </tbody>
+                  </table>
+                </if>
+                <if condition="!selected.hasEvents">
+                  <div class="empty-note">No events generated</div>
+                </if>
+              </div>
+            </details>
+          </if>
+        </section>
+
+        <section class="panel params-panel">
+          <div class="panel-head">
+            <h3>Contract Parameters</h3>
+            <span class="mono dim">{{selected.paramCount}} terms</span>
+          </div>
+          <div class="param-form">
+            <for each="p in selected.params">
+              <div class="param-field" ?data-invalid="{{p.invalid}}" ?data-missing="{{p.status == 'required-missing'}}">
+                <label class="param-label">{{p.label}} <span class="param-code mono">{{p.code}}</span></label>
+                <if condition="p.kind == 'select'">
+                  <div class="opt-group" role="group" aria-label="{{p.label}}">
+                    <for each="opt in p.options">
+                      <button
+                        class="opt-btn"
+                        ?data-selected="{{opt.value == p.value}}"
+                        @click="{onParamSelect(p.key, opt.value)}"
+                      >
+                        <span class="opt-label">{{opt.label}}</span>
+                        <span class="opt-code mono">{{opt.value}}</span>
+                      </button>
+                    </for>
+                  </div>
+                </if>
+                <if condition="p.kind == 'date'">
+                  <input type="date" value="{{p.value}}" @change="{onParamChange(p.key, e)}" />
+                </if>
+                <if condition="p.kind == 'number'">
+                  <input type="number" step="{{p.step}}" value="{{p.value}}" @change="{onParamChange(p.key, e)}" />
+                </if>
+                <if condition="p.kind == 'text'">
+                  <input type="text" value="{{p.value}}" @change="{onParamChange(p.key, e)}" />
+                </if>
+                <span class="field-flags">
+                  <if condition="p.invalid">
+                    <span class="field-error">{{p.errorCode}}</span>
+                  </if>
+                  <if condition="p.status == 'required-missing'">
+                    <span class="field-error">required</span>
+                  </if>
+                  <if condition="p.status == 'required-set'">
+                    <span class="field-ok">required</span>
+                  </if>
+                </span>
+              </div>
+            </for>
+          </div>
+
+          <if condition="!selected.validation.valid">
+            <div class="validation-list">
+              <for each="err in selected.validation.errors">
+                <span class="validation-item" data-code="{{err.code}}">{{err.message}}</span>
+              </for>
+            </div>
+          </if>
+          <button
+            class="btn-primary"
+            ?disabled="{{!selected.validation.valid}}"
+            @click="{generate()}"
+          >
+            Generate Schedule
+          </button>
+        </section>
+
+        <details class="scenario-panel">
+          <summary>Risk Factor Scenario</summary>
+          <p class="dim scenario-hint">
+            Market observations drive rate resets (RRMO lookups), unit prices and externally
+            observed events. Series act as step functions: the latest observation at or before
+            each requested time applies.
+          </p>
+          <div class="scenario-grid">
+            <div class="scenario-add">
+              <h4>Rate observations</h4>
+              <div class="scenario-row">
+                <input w-ref="{rateCodeEl}" type="text" placeholder="Market object code" />
+                <input w-ref="{rateTimeEl}" type="date" />
+                <input w-ref="{rateValueEl}" type="number" step="0.001" placeholder="Rate" />
+                <button class="btn-secondary" @click="{addRate()}">Add</button>
+              </div>
+              <for each="r in scenario.rates">
+                <div class="scenario-entry">
+                  <span class="mono">{{r.code}}</span>
+                  <span class="mono dim">{{r.time}}</span>
+                  <span class="mono">{{r.value}}</span>
+                  <button class="btn-ghost" @click="{removeRate(r.index)}" aria-label="Remove rate">&times;</button>
+                </div>
+              </for>
+            </div>
+            <div class="scenario-add">
+              <h4>Observed events</h4>
+              <div class="scenario-row">
+                <select w-ref="{observedTypeEl}">
+                  <option>PP</option>
+                  <option>IP</option>
+                  <option>AD</option>
+                  <option>MD</option>
+                </select>
+                <input w-ref="{observedTimeEl}" type="date" />
+                <input w-ref="{observedPayoffEl}" type="number" step="100" placeholder="Payoff" />
+                <button class="btn-secondary" @click="{addObservedEvent()}">Add</button>
+              </div>
+              <for each="ev in scenario.events">
+                <div class="scenario-entry">
+                  <span class="mono">{{ev.eventType}}</span>
+                  <span class="mono dim">{{ev.time}}</span>
+                  <span class="mono">{{ev.payoff}}</span>
+                  <button class="btn-ghost" @click="{removeObservedEvent(ev.index)}" aria-label="Remove event">&times;</button>
+                </div>
+              </for>
+            </div>
+          </div>
+          <if condition="scenario.hasEntries">
+            <button class="btn-ghost clear" @click="{clearScenario()}">Clear scenario</button>
+          </if>
+        </details>
+
+        <section class="panel spec-panel">
+          <h3>Contract Specification</h3>
+          <p class="spec-text">{{selected.spec}}</p>
+          <div class="spec-events">
+            <div class="spec-events-title">Key Events</div>
+            <div class="spec-events-list">
+              <for each="label in selected.keyEvents">
+                <span class="badge" data-kind="other">{{label}}</span>
+              </for>
+            </div>
+          </div>
+        </section>
+
+        <details class="panel debug-panel">
+          <summary>
+            JSON Debug &mdash; {{selected.acronym}} inputs &amp; response
+            <span class="dim">(the exact data sent to the engine)</span>
+          </summary>
+          <div class="debug-toolbar">
+            <button class="btn-secondary" @click="{copyDebug(e)}">Copy all</button>
+            <span class="dim">{{selected.eventCount}} events &middot; last build: terms &rarr; validate &rarr; evaluate</span>
+          </div>
+          <div class="debug-block">
+            <div class="debug-label">Terms (built from the form values above)</div>
+            <pre class="mono debug-pre">{{debugTerms}}</pre>
+          </div>
+          <div class="debug-block">
+            <div class="debug-label">Validation report</div>
+            <pre class="mono debug-pre">{{debugValid}}</pre>
+          </div>
+          <div class="debug-block">
+            <div class="debug-label">Risk factor scenario</div>
+            <pre class="mono debug-pre">{{debugScenario}}</pre>
+          </div>
+          <div class="debug-block">
+            <div class="debug-label">Evaluation response</div>
+            <pre class="mono debug-pre">{{debugResponse}}</pre>
+          </div>
+        </details>
+
+        <details class="matrix-panel">
+          <summary>Applicability Matrix &mdash; {{matrix.attrCount}} attributes &times; {{matrix.rows.length}} contract types</summary>
+          <p class="dim matrix-hint">
+            Click a contract type row to open it. Hover a column header for the dictionary
+            description of the attribute.
+          </p>
+          <div class="legend matrix-legend">
+            <span class="legend-item"><span class="matrix-dot" data-level="base"></span>base required</span>
+            <span class="legend-item"><span class="matrix-dot" data-level="required"></span>required</span>
+            <span class="legend-item"><span class="matrix-dot" data-level="applicable"></span>applicable</span>
+            <span class="legend-item"><span class="matrix-dot" data-level="none"></span>not applicable</span>
+          </div>
+          <div class="matrix-scroll">
+            <div class="matrix-grid">
+              <div class="matrix-corner"></div>
+              <for each="attr in matrix.attributes">
+                <div class="matrix-head" title="{{attr.name}} ({{attr.acronym}}, {{attr.dataType}}): {{attr.description}}">{{attr.acronym}}</div>
+              </for>
+              <for each="row in matrix.rows">
+                <button
+                  class="matrix-row-label"
+                  ?data-selected="{{row.isSelected}}"
+                  @click="{selectContract(row.acronym)}"
+                >{{row.acronym}}</button>
+                <for each="cell in row.cells">
+                  <span class="matrix-cell" data-level="{{cell}}"></span>
+                </for>
+              </for>
+            </div>
+          </div>
+        </details>
+      </div>
+    </main>
+  </div>
+</template>

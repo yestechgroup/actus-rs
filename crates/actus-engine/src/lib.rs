@@ -9,8 +9,9 @@
 //! Module map:
 //!
 //! - [`daycount`]: day count fractions (techspec "Year Fraction Convention").
-//! - [`schedule`]: cycle unrolling with EOM and business day conventions
-//!   (techspec "Schedule").
+//! - [`schedule`]: cycle unrolling with EOM and business day conventions,
+//!   array schedules over segmented anchors/cycles (techspec "Schedule",
+//!   paper §3.2 "Array Schedule").
 //! - [`state`]: state variables and the pre-IED initial state (techspec
 //!   "State Variables", states dictionary).
 //! - [`event`]: contract events and the same-timestamp ordering rule
@@ -18,22 +19,36 @@
 //! - [`risk`]: risk factor observation (techspec "Risk Factor Observer").
 //! - [`engine`]: contract type dispatch ([`ContractEngine`],
 //!   [`EngineRegistry`], [`evaluate`]).
+//!
+//! Contract type modules: [`pam`], [`lam`], [`lax`], [`nam`], [`ann`],
+//! [`clm`], [`ump`], [`csh`], [`stk`], [`com`], [`fxout`], [`swppv`],
+//! [`swaps`], [`capfl`], [`optns`], [`futur`], [`ceg`], [`cec`].
 
 pub mod ann;
+pub mod capfl;
 pub mod cec;
+pub mod ceg;
 pub mod clm;
+pub mod com;
 pub mod common;
 pub mod csh;
 pub mod daycount;
 pub mod engine;
 pub mod event;
+pub mod futur;
+pub mod fxout;
 pub mod lam;
+pub mod lax;
 pub mod nam;
+pub mod optns;
 pub mod pam;
 pub mod risk;
 pub mod schedule;
 pub mod state;
+pub mod stk;
 pub mod swaps;
+pub mod swppv;
+pub mod ump;
 
 pub use engine::{evaluate, ContractEngine, EngineRegistry};
 pub use event::{sort_events, ContractEvent};

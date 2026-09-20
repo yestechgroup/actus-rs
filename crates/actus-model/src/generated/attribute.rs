@@ -31,13 +31,18 @@ pub enum AttributeType {
     TimestampArray,
 }
 
-/// One ACTUS dictionary attribute (identifier, acronym and declared type).
+/// One ACTUS dictionary attribute (identifier, acronym, label, description
+/// and declared type).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Attribute {
     /// Dictionary identifier (camelCase), e.g. `notionalPrincipal`.
     pub identifier: &'static str,
     /// Dictionary acronym, e.g. `NT`.
     pub acronym: &'static str,
+    /// Dictionary display name (label), e.g. `Notional Principal`.
+    pub name: &'static str,
+    /// Dictionary description.
+    pub description: &'static str,
     /// Dictionary declared type.
     pub attribute_type: AttributeType,
 }
@@ -46,6 +51,9 @@ pub struct Attribute {
 pub const ACCRUED_INTEREST: Attribute = Attribute {
     identifier: "accruedInterest",
     acronym: "IPAC",
+    name: "Accrued Interest",
+    description:
+        "If accruedInterest(IPAC)  has a specified value possibly 0.0 at statusDate this value will be used.  If this contract term is not specified for appropriate  interest-bearing contract types, ( PAM, ANN, LAM,  etc. ) and  statusDate is after the contract IED, the accruedInterest amount at statusDate will be estimated using the statusDate values for nominalInterestRate, notionalPrincipal and an accrual interval starting at the most recent interestPayment or the IED date if no IP event yet.  This estimate will be correct if there has been no rate or principal change since that estimated accrual period start date.",
     attribute_type: AttributeType::Real,
 };
 
@@ -53,6 +61,9 @@ pub const ACCRUED_INTEREST: Attribute = Attribute {
 pub const AMORTIZATION_DATE: Attribute = Attribute {
     identifier: "amortizationDate",
     acronym: "AMD",
+    name: "Amortization Date",
+    description:
+        "This Date is used to calculate the annuity amounts for ANN and ANX NGX CT's. Needs only to be set in case where the contract balloon at MD and MD is less than AD.",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -60,6 +71,8 @@ pub const AMORTIZATION_DATE: Attribute = Attribute {
 pub const ARRAY_CYCLE_ANCHOR_DATE_OF_INTEREST_PAYMENT: Attribute = Attribute {
     identifier: "arrayCycleAnchorDateOfInterestPayment",
     acronym: "ARIPANXi",
+    name: "Array Cycle Anchor Date Of Interest Payment",
+    description: "Same like IPANX but as array",
     attribute_type: AttributeType::TimestampArray,
 };
 
@@ -67,6 +80,8 @@ pub const ARRAY_CYCLE_ANCHOR_DATE_OF_INTEREST_PAYMENT: Attribute = Attribute {
 pub const ARRAY_CYCLE_ANCHOR_DATE_OF_PRINCIPAL_REDEMPTION: Attribute = Attribute {
     identifier: "arrayCycleAnchorDateOfPrincipalRedemption",
     acronym: "ARPRANXj",
+    name: "Array Cycle Anchor Date Of Principal Redemption",
+    description: "Same like PRANX but as array",
     attribute_type: AttributeType::TimestampArray,
 };
 
@@ -74,6 +89,8 @@ pub const ARRAY_CYCLE_ANCHOR_DATE_OF_PRINCIPAL_REDEMPTION: Attribute = Attribute
 pub const ARRAY_CYCLE_ANCHOR_DATE_OF_RATE_RESET: Attribute = Attribute {
     identifier: "arrayCycleAnchorDateOfRateReset",
     acronym: "ARRRANX",
+    name: "Array Cycle Anchor Date Of Rate Reset",
+    description: "Same like RRANX but as array",
     attribute_type: AttributeType::TimestampArray,
 };
 
@@ -81,6 +98,8 @@ pub const ARRAY_CYCLE_ANCHOR_DATE_OF_RATE_RESET: Attribute = Attribute {
 pub const ARRAY_CYCLE_OF_INTEREST_PAYMENT: Attribute = Attribute {
     identifier: "arrayCycleOfInterestPayment",
     acronym: "ARIPCLi",
+    name: "Array Cycle Of Interest Payment",
+    description: "Same like IPCL but as array",
     attribute_type: AttributeType::CycleArray,
 };
 
@@ -88,6 +107,8 @@ pub const ARRAY_CYCLE_OF_INTEREST_PAYMENT: Attribute = Attribute {
 pub const ARRAY_CYCLE_OF_PRINCIPAL_REDEMPTION: Attribute = Attribute {
     identifier: "arrayCycleOfPrincipalRedemption",
     acronym: "ARPRCLj",
+    name: "Array Cycle Of Principal Redemption",
+    description: "Same like PRCL but as array",
     attribute_type: AttributeType::CycleArray,
 };
 
@@ -95,6 +116,8 @@ pub const ARRAY_CYCLE_OF_PRINCIPAL_REDEMPTION: Attribute = Attribute {
 pub const ARRAY_CYCLE_OF_RATE_RESET: Attribute = Attribute {
     identifier: "arrayCycleOfRateReset",
     acronym: "ARRRCL",
+    name: "Array Cycle Of Rate Reset",
+    description: "Same like RRCL but as array",
     attribute_type: AttributeType::CycleArray,
 };
 
@@ -102,6 +125,9 @@ pub const ARRAY_CYCLE_OF_RATE_RESET: Attribute = Attribute {
 pub const ARRAY_FIXED_VARIABLE: Attribute = Attribute {
     identifier: "arrayFixedVariable",
     acronym: "ARFIXVAR",
+    name: "Array Fixed Variable",
+    description:
+        "For array-type rate reset schedules, this attributes defines the meaning of ARRATE.",
     attribute_type: AttributeType::EnumArray,
 };
 
@@ -109,6 +135,9 @@ pub const ARRAY_FIXED_VARIABLE: Attribute = Attribute {
 pub const ARRAY_INCREASE_DECREASE: Attribute = Attribute {
     identifier: "arrayIncreaseDecrease",
     acronym: "ARINCDEC",
+    name: "Array Increase Decrease",
+    description:
+        "Indicates whether a certain PRNXT element in ARPRNX increases the principal (NT) or decreases it.\r\nApplies only for ANX, NAX, LAX Maturity CTs. For all other Maturity CTs the first principal payment is always in the opposite direction of all other (following) payments.",
     attribute_type: AttributeType::EnumArray,
 };
 
@@ -116,6 +145,8 @@ pub const ARRAY_INCREASE_DECREASE: Attribute = Attribute {
 pub const ARRAY_NEXT_PRINCIPAL_REDEMPTION_PAYMENT: Attribute = Attribute {
     identifier: "arrayNextPrincipalRedemptionPayment",
     acronym: "ARPRNXTj",
+    name: "Array Next Principal Redemption Payment",
+    description: "Same like PRNXT but as array",
     attribute_type: AttributeType::RealArray,
 };
 
@@ -123,6 +154,9 @@ pub const ARRAY_NEXT_PRINCIPAL_REDEMPTION_PAYMENT: Attribute = Attribute {
 pub const ARRAY_RATE: Attribute = Attribute {
     identifier: "arrayRate",
     acronym: "ARRATE",
+    name: "Array Rate",
+    description:
+        "For array-type rate reset schedules, this attribute represents either an interest rate (corresponding to IPNR) or a spread (corresponding to RRSP). Which case applies depends on the attribute ARFIXVAR: if ARFIXVAR=FIX then it represents the new IPNR and if ARFIXVAR=VAR then the applicable RRSP.",
     attribute_type: AttributeType::RealArray,
 };
 
@@ -130,6 +164,8 @@ pub const ARRAY_RATE: Attribute = Attribute {
 pub const BOUNDARY_CROSSED_FLAG: Attribute = Attribute {
     identifier: "boundaryCrossedFlag",
     acronym: "BCF",
+    name: "Boundary Crossed Flag",
+    description: "Initializes the value of Boundary Crossed Flag state variable at statusDate",
     attribute_type: AttributeType::Boolean,
 };
 
@@ -137,6 +173,9 @@ pub const BOUNDARY_CROSSED_FLAG: Attribute = Attribute {
 pub const BOUNDARY_DIRECTION: Attribute = Attribute {
     identifier: "boundaryDirection",
     acronym: "BDR",
+    name: "Boundary Direction",
+    description:
+        "Boundary direction specifies the direction of motion in the underlying asset's price which will be considered a valid crossing of the boundary and trigger the boundary effect changing which, if any, of the boundary legs is  active.",
     attribute_type: AttributeType::Enum,
 };
 
@@ -144,6 +183,9 @@ pub const BOUNDARY_DIRECTION: Attribute = Attribute {
 pub const BOUNDARY_EFFECT: Attribute = Attribute {
     identifier: "boundaryEffect",
     acronym: "BEF",
+    name: "Boundary Effect",
+    description:
+        "This term specifies which leg - if any-  becomes the active subcontract  when the underlying asset's price crosses the specified boundary value in the specified direction triggerring a boundary crossing event.",
     attribute_type: AttributeType::Enum,
 };
 
@@ -151,6 +193,9 @@ pub const BOUNDARY_EFFECT: Attribute = Attribute {
 pub const BOUNDARY_LEG_INITIALLY_ACTIVE: Attribute = Attribute {
     identifier: "boundaryLegInitiallyActive",
     acronym: "BLIA",
+    name: "Boundary Leg Initially Active",
+    description:
+        "Specifies which leg - if any - is the active contract  in effect when the boundary controlled switch contract starts.",
     attribute_type: AttributeType::Enum,
 };
 
@@ -158,6 +203,8 @@ pub const BOUNDARY_LEG_INITIALLY_ACTIVE: Attribute = Attribute {
 pub const BOUNDARY_MONITORING_ANCHOR_DATE: Attribute = Attribute {
     identifier: "boundaryMonitoringAnchorDate",
     acronym: "BMANX",
+    name: "Boundary Monitoring Anchor Date",
+    description: "The first Boundary monitoring event occurs on this date",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -165,6 +212,9 @@ pub const BOUNDARY_MONITORING_ANCHOR_DATE: Attribute = Attribute {
 pub const BOUNDARY_MONITORING_CYCLE: Attribute = Attribute {
     identifier: "boundaryMonitoringCycle",
     acronym: "BMCL",
+    name: "Boundary Monitoring Cycle",
+    description:
+        "The frequency with which boundary monitoring events occur. It defines how often the system checks to test whether the  market value of the underlying asset has crossed the boundary in the specified direction triggerring  a boundary crossing event.",
     attribute_type: AttributeType::Cycle,
 };
 
@@ -172,6 +222,8 @@ pub const BOUNDARY_MONITORING_CYCLE: Attribute = Attribute {
 pub const BOUNDARY_MONITORING_END_DATE: Attribute = Attribute {
     identifier: "boundaryMonitoringEndDate",
     acronym: "BMED",
+    name: "Boundary Monitoring End Date",
+    description: "Boundary monitoring ends on this date",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -179,6 +231,9 @@ pub const BOUNDARY_MONITORING_END_DATE: Attribute = Attribute {
 pub const BOUNDARY_VALUE: Attribute = Attribute {
     identifier: "boundaryValue",
     acronym: "BV",
+    name: "Boundary Value",
+    description:
+        "Boundary value in a barrier options contract, when reached, triggers the boundary effect specified e.g. Knock-In or Knock-out",
     attribute_type: AttributeType::Real,
 };
 
@@ -186,6 +241,9 @@ pub const BOUNDARY_VALUE: Attribute = Attribute {
 pub const BUSINESS_DAY_CONVENTION: Attribute = Attribute {
     identifier: "businessDayConvention",
     acronym: "BDC",
+    name: "Business Day Convention",
+    description:
+        "BDC's are linked to a calendar. Calendars have working and non-working days. A BDC value other than N means that cash flows cannot fall on non-working days, they must be shifted to the next business day (following) or the previous on (preceding).\r\nThese two simple rules get refined twofold:\r\n- Following modified (preceding): Same like following (preceding), however if a cash flow gets shifted into a new month, then  it is shifted to preceding (following) business day.\r\n- Shift/calculate (SC) and calculate/shift (CS). Accrual, principal, and possibly other calculations are affected by this choice. In the case of SC first the dates are shifted and after the shift cash flows are calculated. In the case of CS it is the other way round.\r\nAttention: Does not affect non-cyclical dates such as PRD, MD, TD, IPCED since they can be set to the correct date directly.",
     attribute_type: AttributeType::Enum,
 };
 
@@ -193,6 +251,9 @@ pub const BUSINESS_DAY_CONVENTION: Attribute = Attribute {
 pub const CALENDAR: Attribute = Attribute {
     identifier: "calendar",
     acronym: "CLDR",
+    name: "Calendar",
+    description:
+        "Calendar defines the non-working days which affect the dates of contract events (CDE's) in combination with EOMC and BDC. Custom calendars can be added as additional enum options.",
     attribute_type: AttributeType::Enum,
 };
 
@@ -200,6 +261,9 @@ pub const CALENDAR: Attribute = Attribute {
 pub const CAPITALIZATION_END_DATE: Attribute = Attribute {
     identifier: "capitalizationEndDate",
     acronym: "IPCED",
+    name: "Capitalization End Date",
+    description:
+        "If IPCED is set, then interest is not paid or received but added to the balance (NT) until IPCED. If IPCED does not coincide with an IP cycle, one additional interest payment gets calculated at IPCED and capitalized. Thereafter normal interest payments occur.",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -207,6 +271,9 @@ pub const CAPITALIZATION_END_DATE: Attribute = Attribute {
 pub const CLEARING_HOUSE: Attribute = Attribute {
     identifier: "clearingHouse",
     acronym: "MRCLH",
+    name: "Clearing House",
+    description:
+        "Indicates wheter CRID takes a clearing house function or not. In other word, whether CRID receive margins (MRIM, MRVM).",
     attribute_type: AttributeType::Enum,
 };
 
@@ -214,6 +281,9 @@ pub const CLEARING_HOUSE: Attribute = Attribute {
 pub const CONTRACT_DEAL_DATE: Attribute = Attribute {
     identifier: "contractDealDate",
     acronym: "CDD",
+    name: "Contract Deal Date",
+    description:
+        "This date signifies the origination of the contract where an agreement between the customer and the bank has been settled. From this date on, the institution will have a (market) risk position for financial contracts. This is even the case when IED is in future.",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -221,6 +291,9 @@ pub const CONTRACT_DEAL_DATE: Attribute = Attribute {
 pub const CONTRACT_ID: Attribute = Attribute {
     identifier: "contractID",
     acronym: "CID",
+    name: "Contract Identifier",
+    description:
+        "Unique identifier of a contract.  \r\nIf the system is used on a single firm level, an internal unique ID can be generated. If used on a national or globally level, a globally unique ID is required.",
     attribute_type: AttributeType::Text,
 };
 
@@ -228,6 +301,9 @@ pub const CONTRACT_ID: Attribute = Attribute {
 pub const CONTRACT_PERFORMANCE: Attribute = Attribute {
     identifier: "contractPerformance",
     acronym: "PRF",
+    name: "Contract Performance",
+    description:
+        "Indicates the current contract performance status. Different states of the contract range from performing to default.",
     attribute_type: AttributeType::Enum,
 };
 
@@ -235,6 +311,9 @@ pub const CONTRACT_PERFORMANCE: Attribute = Attribute {
 pub const CONTRACT_ROLE: Attribute = Attribute {
     identifier: "contractRole",
     acronym: "CNTRL",
+    name: "Contract Role",
+    description:
+        "CNTRL defines which position the CRID ( the creator of the contract record ) takes in a contract. For example, whether the contract is an asset or liability, a long or short position for the CRID. \r\nMost contracts are simple on or off balance sheet positions which are assets, liabilities. Such contracts can also play a secondary role as a collateral. \r\nThe attribute is highly significant since it determines the direction of all cash flows. The exact meaning is given with each CT in the ACTUS High Level Specification document.",
     attribute_type: AttributeType::Enum,
 };
 
@@ -242,6 +321,9 @@ pub const CONTRACT_ROLE: Attribute = Attribute {
 pub const CONTRACT_STRUCTURE: Attribute = Attribute {
     identifier: "contractStructure",
     acronym: "CTS",
+    name: "Contract Structure",
+    description:
+        "A structure identifying individual or sets of underlying contracts. E.g. for FUTUR, this structure identifies the single underlying contract, for SWAPS, the FirstLeg and SecondLeg are identified, or for CEG, CEC the structure identifies Covered and Covering contracts.",
     attribute_type: AttributeType::ContractReferenceArray,
 };
 
@@ -249,6 +331,9 @@ pub const CONTRACT_STRUCTURE: Attribute = Attribute {
 pub const CONTRACT_TYPE: Attribute = Attribute {
     identifier: "contractType",
     acronym: "CT",
+    name: "Contract Type",
+    description:
+        "The ContractType is the most important information. It defines the cash flow generating pattern of a contract. The ContractType information in combination with a given state of the risk factors will produce a deterministic sequence of cash flows which are the basis of any financial analysis.",
     attribute_type: AttributeType::Enum,
 };
 
@@ -256,6 +341,9 @@ pub const CONTRACT_TYPE: Attribute = Attribute {
 pub const COUNTERPARTY_ID: Attribute = Attribute {
     identifier: "counterpartyID",
     acronym: "CPID",
+    name: "Counterparty Identifier",
+    description:
+        "CPID identifies the counterparty to the CRID in this contract.\r\nCPID is ideally the official LEI which can be a firm, a government body, even a single person etc. However, this can also refer to a annonymous group in which case this information is not to be disclosed. CPID may also refer to a group taking a joint risk or more generally, CPID is the main counterparty, against which the contract has been settled.",
     attribute_type: AttributeType::Text,
 };
 
@@ -263,6 +351,8 @@ pub const COUNTERPARTY_ID: Attribute = Attribute {
 pub const COVERAGE_OF_CREDIT_ENHANCEMENT: Attribute = Attribute {
     identifier: "coverageOfCreditEnhancement",
     acronym: "CECV",
+    name: "Coverage Of Credit Enhancement",
+    description: "Defines which percentage of the exposure is covered",
     attribute_type: AttributeType::Real,
 };
 
@@ -270,6 +360,9 @@ pub const COVERAGE_OF_CREDIT_ENHANCEMENT: Attribute = Attribute {
 pub const CREATOR_ID: Attribute = Attribute {
     identifier: "creatorID",
     acronym: "CRID",
+    name: "Creator Identifier",
+    description:
+        "This identifies the legal entity creating the contract record. The counterparty of the contract is tracked in CPID.\r\nCRID is ideally the official LEI which can be a firm, a government body, even a single person etc. However, this can also refer to a annonymous group in which case this information is not to be disclosed. CRID may also refer to a group taking a joint risk.",
     attribute_type: AttributeType::Text,
 };
 
@@ -277,6 +370,9 @@ pub const CREATOR_ID: Attribute = Attribute {
 pub const CREDIT_EVENT_TYPE_COVERED: Attribute = Attribute {
     identifier: "creditEventTypeCovered",
     acronym: "CETC",
+    name: "Credit Event Type Covered",
+    description:
+        "The type of credit events covered e.g. in credit enhancement or credit default swap contracts. Only the defined credit event types may trigger the protection.",
     attribute_type: AttributeType::EnumArray,
 };
 
@@ -284,6 +380,9 @@ pub const CREDIT_EVENT_TYPE_COVERED: Attribute = Attribute {
 pub const CREDIT_LINE_AMOUNT: Attribute = Attribute {
     identifier: "creditLineAmount",
     acronym: "CLA",
+    name: "Credit Line Amount",
+    description:
+        "If defined, gives the total amount that can be drawn from a credit line. The remaining amount that can still be drawn is given by CLA-NT.\r\nFor ANN, NAM, the credit line can only be drawn prior to PRANX-1PRCL.\r\nFor CRL, the remaining amount that can still be drawn is given by CLA-Sum(NT of attached contracts).",
     attribute_type: AttributeType::Real,
 };
 
@@ -291,6 +390,8 @@ pub const CREDIT_LINE_AMOUNT: Attribute = Attribute {
 pub const CURRENCY: Attribute = Attribute {
     identifier: "currency",
     acronym: "CUR",
+    name: "Currency",
+    description: "The currency of the cash flows.",
     attribute_type: AttributeType::Text,
 };
 
@@ -298,6 +399,9 @@ pub const CURRENCY: Attribute = Attribute {
 pub const CURRENCY2: Attribute = Attribute {
     identifier: "currency2",
     acronym: "CUR2",
+    name: "Currency 2",
+    description:
+        "The currency of the cash flows of the second leg (if not defined, main currency applies)\r\n",
     attribute_type: AttributeType::Text,
 };
 
@@ -305,6 +409,9 @@ pub const CURRENCY2: Attribute = Attribute {
 pub const CYCLE_ANCHOR_DATE_OF_DIVIDEND: Attribute = Attribute {
     identifier: "cycleAnchorDateOfDividend",
     acronym: "DVANX",
+    name: "Cycle Anchor Date Of Dividend",
+    description:
+        "Date from which the dividend payment date schedule is calculated according to the cycle length. The first dividend payment event takes place on this anchor.",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -312,6 +419,9 @@ pub const CYCLE_ANCHOR_DATE_OF_DIVIDEND: Attribute = Attribute {
 pub const CYCLE_ANCHOR_DATE_OF_FEE: Attribute = Attribute {
     identifier: "cycleAnchorDateOfFee",
     acronym: "FEANX",
+    name: "Cycle Anchor Date Of Fee",
+    description:
+        "Date from which the fee payment date schedule is calculated according to the cycle length. The first fee payment event takes place on this anchor.",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -319,6 +429,9 @@ pub const CYCLE_ANCHOR_DATE_OF_FEE: Attribute = Attribute {
 pub const CYCLE_ANCHOR_DATE_OF_INTEREST_CALCULATION_BASE: Attribute = Attribute {
     identifier: "cycleAnchorDateOfInterestCalculationBase",
     acronym: "IPCBANX",
+    name: "Cycle Anchor Date Of Interest Calculation Base",
+    description:
+        "Date from which the interest calculation base date schedule is calculated according to the cycle length. The first interest calculation base event takes place on this anchor.",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -326,6 +439,9 @@ pub const CYCLE_ANCHOR_DATE_OF_INTEREST_CALCULATION_BASE: Attribute = Attribute 
 pub const CYCLE_ANCHOR_DATE_OF_INTEREST_PAYMENT: Attribute = Attribute {
     identifier: "cycleAnchorDateOfInterestPayment",
     acronym: "IPANX",
+    name: "Cycle Anchor Date Of Interest Payment",
+    description:
+        "Date from which the interest payment date schedule is calculated according to the cycle length. The first interest payment event takes place on this anchor.",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -333,6 +449,9 @@ pub const CYCLE_ANCHOR_DATE_OF_INTEREST_PAYMENT: Attribute = Attribute {
 pub const CYCLE_ANCHOR_DATE_OF_MARGINING: Attribute = Attribute {
     identifier: "cycleAnchorDateOfMargining",
     acronym: "MRANX",
+    name: "Cycle Anchor Date Of Margining",
+    description:
+        "Date from which the margin call date schedule is calculated according to the cycle length. The first margin call event takes place on this anchor.",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -340,6 +459,9 @@ pub const CYCLE_ANCHOR_DATE_OF_MARGINING: Attribute = Attribute {
 pub const CYCLE_ANCHOR_DATE_OF_OPTIONALITY: Attribute = Attribute {
     identifier: "cycleAnchorDateOfOptionality",
     acronym: "OPANX",
+    name: "Cycle Anchor Date Of Optionality",
+    description:
+        "Used for Basic Maturities (such as PAM, RGM, ANN, NGM and their Step-up versions) and American and Bermudan style options. \r\n- Basic Maturities: Within the group of these Maturities, it indicates the possibility of prepayments. Prepayment features are controlled by Behavior. \r\n- American and Bermudan style Options: Begin of exercise period.",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -347,6 +469,9 @@ pub const CYCLE_ANCHOR_DATE_OF_OPTIONALITY: Attribute = Attribute {
 pub const CYCLE_ANCHOR_DATE_OF_PRINCIPAL_REDEMPTION: Attribute = Attribute {
     identifier: "cycleAnchorDateOfPrincipalRedemption",
     acronym: "PRANX",
+    name: "Cycle Anchor Date Of Principal Redemption",
+    description:
+        "Date from which the principal payment date schedule is calculated according to the cycle length. The first principal payment event takes place on this anchor.",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -354,6 +479,9 @@ pub const CYCLE_ANCHOR_DATE_OF_PRINCIPAL_REDEMPTION: Attribute = Attribute {
 pub const CYCLE_ANCHOR_DATE_OF_RATE_RESET: Attribute = Attribute {
     identifier: "cycleAnchorDateOfRateReset",
     acronym: "RRANX",
+    name: "Cycle Anchor Date Of Rate Reset",
+    description:
+        "Date from which the rate reset date schedule is calculated according to the cycle length. The first rate reset event takes place on this anchor.",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -361,6 +489,9 @@ pub const CYCLE_ANCHOR_DATE_OF_RATE_RESET: Attribute = Attribute {
 pub const CYCLE_ANCHOR_DATE_OF_SCALING_INDEX: Attribute = Attribute {
     identifier: "cycleAnchorDateOfScalingIndex",
     acronym: "SCANX",
+    name: "Cycle Anchor Date Of Scaling Index",
+    description:
+        "Date from which the scaling date schedule is calculated according to the cycle length. The first scaling event takes place on this anchor.",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -368,6 +499,9 @@ pub const CYCLE_ANCHOR_DATE_OF_SCALING_INDEX: Attribute = Attribute {
 pub const CYCLE_OF_DIVIDEND: Attribute = Attribute {
     identifier: "cycleOfDividend",
     acronym: "DVCL",
+    name: "Cycle Of Dividend",
+    description:
+        "Defines in combination with DVANX the payment points of dividends. The dividend payment schedule will start at DVANX and end at MaximumProjectionPeriod (cf. sheet Modeling Parameters).",
     attribute_type: AttributeType::Cycle,
 };
 
@@ -375,6 +509,8 @@ pub const CYCLE_OF_DIVIDEND: Attribute = Attribute {
 pub const CYCLE_OF_FEE: Attribute = Attribute {
     identifier: "cycleOfFee",
     acronym: "FECL",
+    name: "Cycle Of Fee",
+    description: "Defines in combination with FEANX the payment points of fees",
     attribute_type: AttributeType::Cycle,
 };
 
@@ -382,6 +518,9 @@ pub const CYCLE_OF_FEE: Attribute = Attribute {
 pub const CYCLE_OF_INTEREST_CALCULATION_BASE: Attribute = Attribute {
     identifier: "cycleOfInterestCalculationBase",
     acronym: "IPCBCL",
+    name: "Cycle Of Interest Calculation Base",
+    description:
+        "Concerning the format see PRCL. \r\nDefines the subsequent adjustment points to NT of the interest payment calculation base.",
     attribute_type: AttributeType::Cycle,
 };
 
@@ -389,6 +528,9 @@ pub const CYCLE_OF_INTEREST_CALCULATION_BASE: Attribute = Attribute {
 pub const CYCLE_OF_INTEREST_PAYMENT: Attribute = Attribute {
     identifier: "cycleOfInterestPayment",
     acronym: "IPCL",
+    name: "Cycle Of Interest Payment",
+    description:
+        "Cycle according to which the interest payment date schedule will be calculated.\r\nIn case IPCL is not set, then there will only be an interest payment event at MD (and possibly at IPANX if set).\r\nThe interval will be adjusted yet by EOMC and BDC.",
     attribute_type: AttributeType::Cycle,
 };
 
@@ -396,6 +538,8 @@ pub const CYCLE_OF_INTEREST_PAYMENT: Attribute = Attribute {
 pub const CYCLE_OF_MARGINING: Attribute = Attribute {
     identifier: "cycleOfMargining",
     acronym: "MRCL",
+    name: "Cycle Of Margining",
+    description: "Defines together with MRANX the points where margins can be called.",
     attribute_type: AttributeType::Cycle,
 };
 
@@ -403,6 +547,9 @@ pub const CYCLE_OF_MARGINING: Attribute = Attribute {
 pub const CYCLE_OF_OPTIONALITY: Attribute = Attribute {
     identifier: "cycleOfOptionality",
     acronym: "OPCL",
+    name: "Cycle Of Optionality",
+    description:
+        "Cycle according to which the option exercise date schedule will be calculated.\r\nOPCL can be NULL for American Options or Prepayment Optionality in which case the optionality period starts at OPANX and ends at OPXED (for american options) or MD (in case of prepayment optionality).\r\nThe interval will be adjusted yet by EOMC and BDC.",
     attribute_type: AttributeType::Cycle,
 };
 
@@ -410,6 +557,9 @@ pub const CYCLE_OF_OPTIONALITY: Attribute = Attribute {
 pub const CYCLE_OF_PRINCIPAL_REDEMPTION: Attribute = Attribute {
     identifier: "cycleOfPrincipalRedemption",
     acronym: "PRCL",
+    name: "Cycle Of Principal Redemption",
+    description:
+        "Cycle according to which the interest payment date schedule will be calculated.\r\nIn case PRCL is not set, then there will only be one principal payment event at MD (and possibly at PRANX if set).\r\nThe interval will be adjusted yet by EOMC and BDC.",
     attribute_type: AttributeType::Cycle,
 };
 
@@ -417,6 +567,9 @@ pub const CYCLE_OF_PRINCIPAL_REDEMPTION: Attribute = Attribute {
 pub const CYCLE_OF_RATE_RESET: Attribute = Attribute {
     identifier: "cycleOfRateReset",
     acronym: "RRCL",
+    name: "Cycle Of Rate Reset",
+    description:
+        "Cycle according to which the rate reset date schedule will be calculated.\r\nIn case RRCL is not set, then there will only be one rate reset event at RRANX given RRANX if set.\r\nThe interval will be adjusted yet by EOMC and BDC.",
     attribute_type: AttributeType::Cycle,
 };
 
@@ -424,6 +577,9 @@ pub const CYCLE_OF_RATE_RESET: Attribute = Attribute {
 pub const CYCLE_OF_SCALING_INDEX: Attribute = Attribute {
     identifier: "cycleOfScalingIndex",
     acronym: "SCCL",
+    name: "Cycle Of Scaling Index",
+    description:
+        "Cycle according to which the scaling date schedule will be calculated.\r\nIn case SCCL is not set, then there will only be one scaling event at SCANX given SCANX is set.\r\nThe interval will be adjusted yet by EOMC and BDC.",
     attribute_type: AttributeType::Cycle,
 };
 
@@ -431,6 +587,9 @@ pub const CYCLE_OF_SCALING_INDEX: Attribute = Attribute {
 pub const CYCLE_POINT_OF_INTEREST_PAYMENT: Attribute = Attribute {
     identifier: "cyclePointOfInterestPayment",
     acronym: "IPPNT",
+    name: "Cycle Point Of Interest Payment",
+    description:
+        "Usually, interest is paid at the end of each IPCL which corresponds to a IPPNT value of E which is also the default. If interest payment occurs at the beginning of the cycle, the value is B.",
     attribute_type: AttributeType::Enum,
 };
 
@@ -438,6 +597,9 @@ pub const CYCLE_POINT_OF_INTEREST_PAYMENT: Attribute = Attribute {
 pub const CYCLE_POINT_OF_RATE_RESET: Attribute = Attribute {
     identifier: "cyclePointOfRateReset",
     acronym: "RRPNT",
+    name: "Cycle Point Of Rate Reset",
+    description:
+        "Normally rates get reset at the beginning of any resetting cycles. There are contracts where the rate is not set at the beginning but at the end of the cycle and then applied to the previous cycle (post-fixing); in other words the rate applies before it is fixed. Hence, the new rate is not known during the entire cycle where it applies. Therefore, the rate will be applied backwards at the end of the cycle. This happens through a correction of interest accrued.",
     attribute_type: AttributeType::Enum,
 };
 
@@ -445,6 +607,9 @@ pub const CYCLE_POINT_OF_RATE_RESET: Attribute = Attribute {
 pub const DAY_COUNT_CONVENTION: Attribute = Attribute {
     identifier: "dayCountConvention",
     acronym: "IPDC",
+    name: "Day Count Convention",
+    description:
+        "Method defining how days are counted between two dates. This finally defines the year fraction in accrual calculations.",
     attribute_type: AttributeType::Enum,
 };
 
@@ -452,6 +617,9 @@ pub const DAY_COUNT_CONVENTION: Attribute = Attribute {
 pub const DELINQUENCY_PERIOD: Attribute = Attribute {
     identifier: "delinquencyPeriod",
     acronym: "DQP",
+    name: "Delinquency Period",
+    description:
+        "If real payment happens after scheduled payment date plus DQP, then the counterparty is in technical default. This means that the creditor legally has the right to declare default of the debtor.",
     attribute_type: AttributeType::Period,
 };
 
@@ -459,6 +627,9 @@ pub const DELINQUENCY_PERIOD: Attribute = Attribute {
 pub const DELINQUENCY_RATE: Attribute = Attribute {
     identifier: "delinquencyRate",
     acronym: "DQR",
+    name: "Delinquency Rate",
+    description:
+        "Rate at which Delinquency Payments accrue on NT (in addition to the interest rate) during the DelinquencyPeriod",
     attribute_type: AttributeType::Real,
 };
 
@@ -466,6 +637,9 @@ pub const DELINQUENCY_RATE: Attribute = Attribute {
 pub const DELIVERY_SETTLEMENT: Attribute = Attribute {
     identifier: "deliverySettlement",
     acronym: "DS",
+    name: "Delivery Settlement",
+    description:
+        "Indicates whether the contract is settled in cash or physical delivery.\r\nIn case of physical delivery, the underlying contract and associated (future) cash flows are effectively exchanged. In case of cash settlement, the current market value of the underlying contract determines the cash flow exchanged.",
     attribute_type: AttributeType::Enum,
 };
 
@@ -473,6 +647,9 @@ pub const DELIVERY_SETTLEMENT: Attribute = Attribute {
 pub const END_OF_MONTH_CONVENTION: Attribute = Attribute {
     identifier: "endOfMonthConvention",
     acronym: "EOMC",
+    name: "End Of Month Convention",
+    description:
+        "When computing schedules a special problem arises if an anchor date is at the end of a month and a cycle of monthly or quarterly is applied (yearly in the case of leap years only). How do we have to interpret an anchor date April 30 plus 1M cycles? In case where EOM is selected, it will jump to the 31st of May, then June 30, July 31 and so on. If SM is selected, it will jump to the 30st always with of course an exception in February. \r\nThis logic applies for all months having 30 or less days and an anchor date at the last day. Month with 31 days will at any rate jump to the last of the month if anchor date is on the last day.",
     attribute_type: AttributeType::Enum,
 };
 
@@ -480,6 +657,9 @@ pub const END_OF_MONTH_CONVENTION: Attribute = Attribute {
 pub const EX_DIVIDEND_DATE: Attribute = Attribute {
     identifier: "exDividendDate",
     acronym: "DVEX",
+    name: "Ex Dividend Date",
+    description:
+        "In case contract is traded between DVEX and next DV payment date (i.e. PRD>DVEX & PRD<next DV payment date), then the old holder of the contract (previous to the trade) receives the next DV payment. In other words, the next DV payment is cancelled for the new (after the trade) holder of the contract.",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -487,6 +667,9 @@ pub const EX_DIVIDEND_DATE: Attribute = Attribute {
 pub const EXERCISE_AMOUNT: Attribute = Attribute {
     identifier: "exerciseAmount",
     acronym: "XA",
+    name: "Exercise Amount",
+    description:
+        "The amount fixed at Exercise Date for a contingent event/obligation such as a forward condition, optionality etc. The Exercise Amount is fixed at Exercise Date but not settled yet.",
     attribute_type: AttributeType::Real,
 };
 
@@ -494,6 +677,9 @@ pub const EXERCISE_AMOUNT: Attribute = Attribute {
 pub const EXERCISE_DATE: Attribute = Attribute {
     identifier: "exerciseDate",
     acronym: "XD",
+    name: "Exercise Date",
+    description:
+        "Date of exercising a contingent event/obligation such as a forward condition, optionality etc. The Exercise date marks the observed timestamp of fixing the contingent event and respective payment obligation not necessarily the timestamp of settling the obligation.",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -501,6 +687,8 @@ pub const EXERCISE_DATE: Attribute = Attribute {
 pub const FEE_ACCRUED: Attribute = Attribute {
     identifier: "feeAccrued",
     acronym: "FEAC",
+    name: "Fee Accrued",
+    description: "Accrued fees as per SD",
     attribute_type: AttributeType::Real,
 };
 
@@ -508,6 +696,9 @@ pub const FEE_ACCRUED: Attribute = Attribute {
 pub const FEE_BASIS: Attribute = Attribute {
     identifier: "feeBasis",
     acronym: "FEB",
+    name: "Fee Basis",
+    description:
+        "Basis, on which Fee is calculated. For FEB=’A’, FER is interpreted as an absolute amount to be paid at every FP event and for FEB=’N’, FER represents a rate at which FP amounts accrue on the basis of the contract’s NT.",
     attribute_type: AttributeType::Enum,
 };
 
@@ -515,6 +706,9 @@ pub const FEE_BASIS: Attribute = Attribute {
 pub const FEE_RATE: Attribute = Attribute {
     identifier: "feeRate",
     acronym: "FER",
+    name: "Fee Rate",
+    description:
+        "Rate of Fee which is a percentage of the underlying or FER is an absolute amount. For all contracts where FEB does not apply (cf. business rules), FER is interpreted as an absolute amount.",
     attribute_type: AttributeType::Real,
 };
 
@@ -522,6 +716,9 @@ pub const FEE_RATE: Attribute = Attribute {
 pub const FIXING_PERIOD: Attribute = Attribute {
     identifier: "fixingPeriod",
     acronym: "RRFIX",
+    name: "Fixing Period",
+    description:
+        "Interest rate resets (adjustments) are usually fixed one or two days (usually Business Days) before the new rate applies (defined by the rate reset schedule). This field holds the period between fixing and application of a rate.",
     attribute_type: AttributeType::Period,
 };
 
@@ -529,6 +726,9 @@ pub const FIXING_PERIOD: Attribute = Attribute {
 pub const FUTURES_PRICE: Attribute = Attribute {
     identifier: "futuresPrice",
     acronym: "PFUT",
+    name: "Futures Price",
+    description:
+        "The price the counterparties agreed upon at which the underlying contract (of a FUTUR) is exchanged/settled at STD. Quoting is different for different types of underlyings: Fixed Income = in percentage, all others in nominal terms.",
     attribute_type: AttributeType::Real,
 };
 
@@ -536,6 +736,9 @@ pub const FUTURES_PRICE: Attribute = Attribute {
 pub const GRACE_PERIOD: Attribute = Attribute {
     identifier: "gracePeriod",
     acronym: "GRP",
+    name: "Grace Period",
+    description:
+        "If real payment happens after scheduled payment date plus GRP, then the payment is in delay.",
     attribute_type: AttributeType::Period,
 };
 
@@ -543,6 +746,9 @@ pub const GRACE_PERIOD: Attribute = Attribute {
 pub const GUARANTEED_EXPOSURE: Attribute = Attribute {
     identifier: "guaranteedExposure",
     acronym: "CEGE",
+    name: "Guaranteed Exposure",
+    description:
+        "Defines which value of the exposure is covered:\r\n- NO: Nominal Value\r\n- NI: Nominal plus Interest\r\n- MV: Market Value",
     attribute_type: AttributeType::Enum,
 };
 
@@ -550,6 +756,9 @@ pub const GUARANTEED_EXPOSURE: Attribute = Attribute {
 pub const INITIAL_EXCHANGE_DATE: Attribute = Attribute {
     identifier: "initialExchangeDate",
     acronym: "IED",
+    name: "Initial Exchange Date",
+    description:
+        "Date of the initial cash flow for Maturity and Non-Maturity CT's. It also coincides with the beginning of interest accrual calculation.",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -557,6 +766,9 @@ pub const INITIAL_EXCHANGE_DATE: Attribute = Attribute {
 pub const INITIAL_MARGIN: Attribute = Attribute {
     identifier: "initialMargin",
     acronym: "MRIM",
+    name: "Initial Margin",
+    description:
+        "Margin to cover losses which may be incurred as a result of market fluctuations. \r\nUpon contract closing or maturity, the MRIM is reimbursed.",
     attribute_type: AttributeType::Real,
 };
 
@@ -564,6 +776,9 @@ pub const INITIAL_MARGIN: Attribute = Attribute {
 pub const INTEREST_CALCULATION_BASE: Attribute = Attribute {
     identifier: "interestCalculationBase",
     acronym: "IPCB",
+    name: "Interest Calculation Base",
+    description:
+        "This is important for amortizing instruments. The basis of interest calculation is normally the notional outstanding amount as per SD. This is considered the fair basis and in many countries the only legal basis. If NULL or NTSD is selected, this is the case. \r\nAlternative bases (normally in order to favor the lending institution) are found. In the extreme case the original balance (PCDD=NT+PDCDD) never gets adjusted. In this case PCDD must be chosen. \r\nAn intermediate case exist wherre balances do get adjusted, however with lags. In this case NTL mut be selected and anchor dates and cycles must be set.",
     attribute_type: AttributeType::Enum,
 };
 
@@ -571,6 +786,9 @@ pub const INTEREST_CALCULATION_BASE: Attribute = Attribute {
 pub const INTEREST_CALCULATION_BASE_AMOUNT: Attribute = Attribute {
     identifier: "interestCalculationBaseAmount",
     acronym: "IPCBA",
+    name: "Interest Calculation Base Amount",
+    description:
+        "This is the amount used for the calculation of interest. Calculation base per SD.",
     attribute_type: AttributeType::Real,
 };
 
@@ -578,6 +796,8 @@ pub const INTEREST_CALCULATION_BASE_AMOUNT: Attribute = Attribute {
 pub const INTEREST_SCALING_MULTIPLIER: Attribute = Attribute {
     identifier: "interestScalingMultiplier",
     acronym: "SCIP",
+    name: "Interest Scaling Multiplier",
+    description: "The multiplier being applied to interest cash flows",
     attribute_type: AttributeType::Real,
 };
 
@@ -585,6 +805,9 @@ pub const INTEREST_SCALING_MULTIPLIER: Attribute = Attribute {
 pub const LIFE_CAP: Attribute = Attribute {
     identifier: "lifeCap",
     acronym: "RRLC",
+    name: "Life Cap",
+    description:
+        "For variable rate basic CTs this represents a cap on the interest rate that applies during the entire lifetime of the contract.\r\nFor CAPFL CTs this represents the cap strike rate.",
     attribute_type: AttributeType::Real,
 };
 
@@ -592,6 +815,9 @@ pub const LIFE_CAP: Attribute = Attribute {
 pub const LIFE_FLOOR: Attribute = Attribute {
     identifier: "lifeFloor",
     acronym: "RRLF",
+    name: "Life Floor",
+    description:
+        "For variable rate basic CTs this represents a floor on the interest rate that applies during the entire lifetime of the contract.\r\nFor CAPFL CTs this represents the floor strike rate.",
     attribute_type: AttributeType::Real,
 };
 
@@ -599,6 +825,9 @@ pub const LIFE_FLOOR: Attribute = Attribute {
 pub const MAINTENANCE_MARGIN_LOWER_BOUND: Attribute = Attribute {
     identifier: "maintenanceMarginLowerBound",
     acronym: "MRMML",
+    name: "Maintenance Margin Lower Bound",
+    description:
+        "Defines the lower bound of the Maintenance Margin. If MRVM falls below MRMML, then capital must be added to reach the original MRIM.",
     attribute_type: AttributeType::Real,
 };
 
@@ -606,6 +835,9 @@ pub const MAINTENANCE_MARGIN_LOWER_BOUND: Attribute = Attribute {
 pub const MAINTENANCE_MARGIN_UPPER_BOUND: Attribute = Attribute {
     identifier: "maintenanceMarginUpperBound",
     acronym: "MRMMU",
+    name: "Maintenance Margin Upper Bound",
+    description:
+        "Defines the upper bound of the Maintenance Margin. If MRVM falls above MRMMU, then capital is refunded to reach the original MRIM.",
     attribute_type: AttributeType::Real,
 };
 
@@ -613,6 +845,9 @@ pub const MAINTENANCE_MARGIN_UPPER_BOUND: Attribute = Attribute {
 pub const MARKET_OBJECT_CODE: Attribute = Attribute {
     identifier: "marketObjectCode",
     acronym: "MOC",
+    name: "Market Object Code",
+    description:
+        "Is pointing to the market value at SD (MarketObject).\r\nUnique codes for market objects must be used.",
     attribute_type: AttributeType::Text,
 };
 
@@ -620,6 +855,9 @@ pub const MARKET_OBJECT_CODE: Attribute = Attribute {
 pub const MARKET_OBJECT_CODE_OF_RATE_RESET: Attribute = Attribute {
     identifier: "marketObjectCodeOfRateReset",
     acronym: "RRMO",
+    name: "Market Object Code Of Rate Reset",
+    description:
+        "Is pointing to the interest rate driver (MarketObject) used for rate reset uniquely.\r\nUnique codes for market objects must be used.",
     attribute_type: AttributeType::Text,
 };
 
@@ -627,6 +865,8 @@ pub const MARKET_OBJECT_CODE_OF_RATE_RESET: Attribute = Attribute {
 pub const MARKET_OBJECT_CODE_OF_SCALING_INDEX: Attribute = Attribute {
     identifier: "marketObjectCodeOfScalingIndex",
     acronym: "SCMO",
+    name: "Market Object Code Of Scaling Index",
+    description: "",
     attribute_type: AttributeType::Text,
 };
 
@@ -634,6 +874,9 @@ pub const MARKET_OBJECT_CODE_OF_SCALING_INDEX: Attribute = Attribute {
 pub const MARKET_VALUE_OBSERVED: Attribute = Attribute {
     identifier: "marketValueObserved",
     acronym: "MVO",
+    name: "Market Value Observed",
+    description:
+        "Value as observed in the market at SD per unit. Incase of fixed income instruments it is a fraction.",
     attribute_type: AttributeType::Real,
 };
 
@@ -641,6 +884,9 @@ pub const MARKET_VALUE_OBSERVED: Attribute = Attribute {
 pub const MATURITY_DATE: Attribute = Attribute {
     identifier: "maturityDate",
     acronym: "MD",
+    name: "Maturity Date",
+    description:
+        "Marks the contractual end of the lifecycle of a CT. Generally, date of the last cash flows. \r\nThis includes normally a principal and an interest payment. Some Maturity CTs as perpetuals (PBN) do not have such a date. For variable amortizing contracts of the ANN CT, this date might be less than the scheduled end of the contract (which is deduced from the periodic payment amount \r\nPRNXT). In this case it balloons.",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -648,6 +894,8 @@ pub const MATURITY_DATE: Attribute = Attribute {
 pub const MAXIMUM_PENALTY_FREE_DISBURSEMENT: Attribute = Attribute {
     identifier: "maximumPenaltyFreeDisbursement",
     acronym: "MPFD",
+    name: "Maximum Penalty Free Disbursement",
+    description: "Defines the notional amount which can be withdrawn before XDN without penalty",
     attribute_type: AttributeType::Real,
 };
 
@@ -655,6 +903,9 @@ pub const MAXIMUM_PENALTY_FREE_DISBURSEMENT: Attribute = Attribute {
 pub const NEXT_DIVIDEND_PAYMENT_AMOUNT: Attribute = Attribute {
     identifier: "nextDividendPaymentAmount",
     acronym: "DVNP",
+    name: "Next Dividend Payment Amount",
+    description:
+        "Defines the next dividend payment (amount) whereas the date of dividend payment is defined through the DVANX/DVCL pair. If DVCL is defined, then this amount will be used as dividend payment for each future dividend payment date.",
     attribute_type: AttributeType::Real,
 };
 
@@ -662,6 +913,9 @@ pub const NEXT_DIVIDEND_PAYMENT_AMOUNT: Attribute = Attribute {
 pub const NEXT_PRINCIPAL_REDEMPTION_PAYMENT: Attribute = Attribute {
     identifier: "nextPrincipalRedemptionPayment",
     acronym: "PRNXT",
+    name: "Next Principal Redemption Payment",
+    description:
+        "Amount of principal that will be paid during the redemption cycle at the next payment date. For amortizing contracts like ANN, NAM, ANX, and NAX this is the total periodic payment amount (sum of interest and principal).",
     attribute_type: AttributeType::Real,
 };
 
@@ -669,6 +923,9 @@ pub const NEXT_PRINCIPAL_REDEMPTION_PAYMENT: Attribute = Attribute {
 pub const NEXT_RESET_RATE: Attribute = Attribute {
     identifier: "nextResetRate",
     acronym: "RRNXT",
+    name: "Next Reset Rate",
+    description:
+        "Holds the new rate that has been fixed already (cf. attribute FixingDays) but not applied. This new rate will be applied at the next rate reset event (after SD and according to the rate reset schedule). Attention, RRNXT must be set to NULL after it is applied!",
     attribute_type: AttributeType::Real,
 };
 
@@ -676,6 +933,9 @@ pub const NEXT_RESET_RATE: Attribute = Attribute {
 pub const NOMINAL_INTEREST_RATE: Attribute = Attribute {
     identifier: "nominalInterestRate",
     acronym: "IPNR",
+    name: "Nominal Interest Rate",
+    description:
+        "The nominal interest rate which will be used to calculate accruals and the next interest payment at the next IP date. NT multiplied with IPNR is the base for the interest payment calculation. The relevant time period is a function of IPDC. \r\nIf the contract is variable (RRANX set) this field is periodically updated per SD. \r\nIn the case of plan vanilla interest rate swaps (IRSPV) this defines the rate of fixed leg.",
     attribute_type: AttributeType::Real,
 };
 
@@ -683,6 +943,9 @@ pub const NOMINAL_INTEREST_RATE: Attribute = Attribute {
 pub const NOMINAL_INTEREST_RATE2: Attribute = Attribute {
     identifier: "nominalInterestRate2",
     acronym: "IPNR2",
+    name: "Nominal Interest Rate 2",
+    description:
+        "The nominal interest rate which will be used to calculate accruals and the next interest payment at the next IP date on the second leg (the one not mentioned in CNTRL) of a plain vanilla swap. The relevant time period is a function of IPDC. \r\nIt is periodically updated per SD.",
     attribute_type: AttributeType::Real,
 };
 
@@ -690,6 +953,9 @@ pub const NOMINAL_INTEREST_RATE2: Attribute = Attribute {
 pub const NON_PERFORMING_DATE: Attribute = Attribute {
     identifier: "nonPerformingDate",
     acronym: "NPD",
+    name: "Non Performing Date",
+    description:
+        "The date of the (uncovered) payment event responsible for the current value of the Contract Performance attribute.",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -697,6 +963,9 @@ pub const NON_PERFORMING_DATE: Attribute = Attribute {
 pub const NOTIONAL_PRINCIPAL: Attribute = Attribute {
     identifier: "notionalPrincipal",
     acronym: "NT",
+    name: "Notional Principal",
+    description:
+        "Current nominal value of the contract. For debt instrument this is the current remaining notional outstanding. \r\nNT is generally the basis on which interest payments are calculated. If IPCBS is set, IPCBS may introduce a different basis for interest payment calculation.",
     attribute_type: AttributeType::Real,
 };
 
@@ -704,6 +973,8 @@ pub const NOTIONAL_PRINCIPAL: Attribute = Attribute {
 pub const NOTIONAL_PRINCIPAL2: Attribute = Attribute {
     identifier: "notionalPrincipal2",
     acronym: "NT2",
+    name: "Notional Principal 2",
+    description: "Notional amount of the second currency to be exchanged in an FXOUT CT.",
     attribute_type: AttributeType::Real,
 };
 
@@ -711,6 +982,8 @@ pub const NOTIONAL_PRINCIPAL2: Attribute = Attribute {
 pub const NOTIONAL_SCALING_MULTIPLIER: Attribute = Attribute {
     identifier: "notionalScalingMultiplier",
     acronym: "SCNT",
+    name: "Notional Scaling Multiplier",
+    description: "The multiplier being applied to principal cash flows",
     attribute_type: AttributeType::Real,
 };
 
@@ -718,6 +991,9 @@ pub const NOTIONAL_SCALING_MULTIPLIER: Attribute = Attribute {
 pub const OPTION_EXERCISE_END_DATE: Attribute = Attribute {
     identifier: "optionExerciseEndDate",
     acronym: "OPXED",
+    name: "Option Exercise End Date",
+    description:
+        "Final exercise date for American and Bermudan options, expiry date for European options.",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -725,6 +1001,9 @@ pub const OPTION_EXERCISE_END_DATE: Attribute = Attribute {
 pub const OPTION_EXERCISE_TYPE: Attribute = Attribute {
     identifier: "optionExerciseType",
     acronym: "OPXT",
+    name: "Option Exercise Type",
+    description:
+        "Defines whether the option is European (exercised at a specific date), American (exercised during a span of time) or Bermudan (exercised at certain points during a span of time).",
     attribute_type: AttributeType::Enum,
 };
 
@@ -732,6 +1011,9 @@ pub const OPTION_EXERCISE_TYPE: Attribute = Attribute {
 pub const OPTION_STRIKE1: Attribute = Attribute {
     identifier: "optionStrike1",
     acronym: "OPS1",
+    name: "Option Strike 1",
+    description:
+        "Strike price of the option. Whether it is a call/put is determined by the attribute OPTP, i.e a call or a put (or a combination of call/put).\r\nThis attribute is used for price related options such as options on bonds, stocks or FX. Interest rate related options (caps/floos) are handled within th RatReset group.",
     attribute_type: AttributeType::Real,
 };
 
@@ -739,6 +1021,8 @@ pub const OPTION_STRIKE1: Attribute = Attribute {
 pub const OPTION_STRIKE2: Attribute = Attribute {
     identifier: "optionStrike2",
     acronym: "OPS2",
+    name: "Option Strike 2",
+    description: "Put price in case of call/put.",
     attribute_type: AttributeType::Real,
 };
 
@@ -746,6 +1030,9 @@ pub const OPTION_STRIKE2: Attribute = Attribute {
 pub const OPTION_TYPE: Attribute = Attribute {
     identifier: "optionType",
     acronym: "OPTP",
+    name: "Option Type",
+    description:
+        "Defines whether the option is a call or put or a combination of it. This field has to be seen in combination with CNTRL where it is defined whether CRID is the buyer or the seller.",
     attribute_type: AttributeType::Enum,
 };
 
@@ -753,6 +1040,8 @@ pub const OPTION_TYPE: Attribute = Attribute {
 pub const PENALTY_RATE: Attribute = Attribute {
     identifier: "penaltyRate",
     acronym: "PYRT",
+    name: "Penalty Rate",
+    description: "Either the rate or the absolute amount of the prepayment.",
     attribute_type: AttributeType::Real,
 };
 
@@ -760,6 +1049,8 @@ pub const PENALTY_RATE: Attribute = Attribute {
 pub const PENALTY_TYPE: Attribute = Attribute {
     identifier: "penaltyType",
     acronym: "PYTP",
+    name: "Penalty Type",
+    description: "Defines whether prepayment is linked to a penalty and of which kind.",
     attribute_type: AttributeType::Enum,
 };
 
@@ -767,6 +1058,9 @@ pub const PENALTY_TYPE: Attribute = Attribute {
 pub const PERIOD_CAP: Attribute = Attribute {
     identifier: "periodCap",
     acronym: "RRPC",
+    name: "Period Cap",
+    description:
+        "For variable rate basic CTs this represents the maximum positive rate change per rate reset cycle.",
     attribute_type: AttributeType::Real,
 };
 
@@ -774,6 +1068,9 @@ pub const PERIOD_CAP: Attribute = Attribute {
 pub const PERIOD_FLOOR: Attribute = Attribute {
     identifier: "periodFloor",
     acronym: "RRPF",
+    name: "Period Floor",
+    description:
+        "For variable rate basic CTs this represents the maximum negative rate change per rate reset cycle.",
     attribute_type: AttributeType::Real,
 };
 
@@ -781,6 +1078,9 @@ pub const PERIOD_FLOOR: Attribute = Attribute {
 pub const PREMIUM_DISCOUNT_AT_IED: Attribute = Attribute {
     identifier: "premiumDiscountAtIED",
     acronym: "PDIED",
+    name: "Premium Discount At IED",
+    description:
+        "Total original premium or discount that has been set at CDD and will be added to the (notional) cash flow at IED (cash flow at IED = NT+PDIED, w.r.t. an RPA CT). \r\nNegative value for discount and positive for premium.\r\nNote, similar to interest the PDIED portion is part of P&L.",
     attribute_type: AttributeType::Real,
 };
 
@@ -788,6 +1088,9 @@ pub const PREMIUM_DISCOUNT_AT_IED: Attribute = Attribute {
 pub const PREPAYMENT_EFFECT: Attribute = Attribute {
     identifier: "prepaymentEffect",
     acronym: "PPEF",
+    name: "Prepayment Effect",
+    description:
+        "This attribute defines whether or not the right of prepayment exists and if yes, how prepayment affects the remaining principal redemption schedule of the contract",
     attribute_type: AttributeType::Enum,
 };
 
@@ -795,6 +1098,9 @@ pub const PREPAYMENT_EFFECT: Attribute = Attribute {
 pub const PREPAYMENT_PERIOD: Attribute = Attribute {
     identifier: "prepaymentPeriod",
     acronym: "PPP",
+    name: "Prepayment Period",
+    description:
+        "If real payment happens before scheduled payment date minus PPP, then it is considered a prepayment. Effect of prepayments are further described in PPEF and related fields.",
     attribute_type: AttributeType::Period,
 };
 
@@ -802,6 +1108,9 @@ pub const PREPAYMENT_PERIOD: Attribute = Attribute {
 pub const PRICE_AT_PURCHASE_DATE: Attribute = Attribute {
     identifier: "priceAtPurchaseDate",
     acronym: "PPRD",
+    name: "Price At Purchase Date",
+    description:
+        "Purchase price exchanged at PRD.  \r\nPPRD represents a clean price (includes premium/discount but not IPAC).",
     attribute_type: AttributeType::Real,
 };
 
@@ -809,6 +1118,9 @@ pub const PRICE_AT_PURCHASE_DATE: Attribute = Attribute {
 pub const PRICE_AT_TERMINATION_DATE: Attribute = Attribute {
     identifier: "priceAtTerminationDate",
     acronym: "PTD",
+    name: "Price At Termination Date",
+    description:
+        "Sellingprice exchanged at PTD  PTDrepresents a clean price (includes premium/discount but not IPAC",
     attribute_type: AttributeType::Real,
 };
 
@@ -816,6 +1128,9 @@ pub const PRICE_AT_TERMINATION_DATE: Attribute = Attribute {
 pub const PURCHASE_DATE: Attribute = Attribute {
     identifier: "purchaseDate",
     acronym: "PRD",
+    name: "Purchase Date",
+    description:
+        "If a contract is bought after initiation (for example a bond on the secondary market) this date has to be set. It refers to the date at which the payment (of PPRD) and transfer of the security happens. In other words, PRD - if set - takes the role otherwise IED has from a cash flow perspective. \r\nNote, CPID of the CT is not the counterparty of the transaction!",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -823,6 +1138,9 @@ pub const PURCHASE_DATE: Attribute = Attribute {
 pub const QUANTITY: Attribute = Attribute {
     identifier: "quantity",
     acronym: "QT",
+    name: "Quantity",
+    description:
+        "This attribute relates either to physical contracts (COM) or underlyings of traded contracts. \r\nIn case of physical contracts it holds the number of underlying units of the specific good (e.g. number of barrels of oil). \r\nIn case of well defined traded contracts it holds the number of defined underlying instruments. Example: QT of STK CTs underlying a FUTUR indicates the number of those specific STK CTs which underlie the FUTUR.",
     attribute_type: AttributeType::Real,
 };
 
@@ -830,6 +1148,9 @@ pub const QUANTITY: Attribute = Attribute {
 pub const RATE_MULTIPLIER: Attribute = Attribute {
     identifier: "rateMultiplier",
     acronym: "RRMLT",
+    name: "Rate Multiplier",
+    description:
+        "Interest rate multiplier. A typical rate resetting rule is LIBOR plus x basis point where x represents the interest rate spread.\r\nHowever, in some cases like reverse or super floater contracts an additional rate multiplier applies. In this case, the new rate is determined as: IPNR after rate reset = Rate selected from the market object * RRMLT + RRSP.",
     attribute_type: AttributeType::Real,
 };
 
@@ -837,6 +1158,9 @@ pub const RATE_MULTIPLIER: Attribute = Attribute {
 pub const RATE_SPREAD: Attribute = Attribute {
     identifier: "rateSpread",
     acronym: "RRSP",
+    name: "Rate Spread",
+    description:
+        "Interest rate spread. A typical rate resetting rule is LIBOR plus x basis point where x represents the interest rate spread.  \r\nThe following equation can be taken if RRMLT is not set: IPNR after rate reset = Rate selected from the market object  + RRSP.",
     attribute_type: AttributeType::Real,
 };
 
@@ -844,6 +1168,9 @@ pub const RATE_SPREAD: Attribute = Attribute {
 pub const SCALING_EFFECT: Attribute = Attribute {
     identifier: "scalingEffect",
     acronym: "SCEF",
+    name: "Scaling Effect",
+    description:
+        "Indicates which payments are scaled. I = Interest payments, N = Nominal payments and M = Maximum deferred interest amount. They can be scaled in any combination.",
     attribute_type: AttributeType::Enum,
 };
 
@@ -851,6 +1178,8 @@ pub const SCALING_EFFECT: Attribute = Attribute {
 pub const SCALING_INDEX_AT_CONTRACT_DEAL_DATE: Attribute = Attribute {
     identifier: "scalingIndexAtContractDealDate",
     acronym: "SCCDD",
+    name: "Scaling Index At Contract Deal Date",
+    description: "The value of the Scaling Index as per Contract Deal Date.",
     attribute_type: AttributeType::Real,
 };
 
@@ -858,6 +1187,9 @@ pub const SCALING_INDEX_AT_CONTRACT_DEAL_DATE: Attribute = Attribute {
 pub const SENIORITY: Attribute = Attribute {
     identifier: "seniority",
     acronym: "SEN",
+    name: "Seniority",
+    description:
+        "Refers to the order of repayment in the event of a sale or default of the issuer. ",
     attribute_type: AttributeType::Enum,
 };
 
@@ -865,6 +1197,9 @@ pub const SENIORITY: Attribute = Attribute {
 pub const SETTLEMENT_CURRENCY: Attribute = Attribute {
     identifier: "settlementCurrency",
     acronym: "CURS",
+    name: "Settlement Currency",
+    description:
+        "The currency in which cash flows are settled. This currency can be different from the currency (CUR) in which cash flows or the contract, respectively, is denominated in which case the respective FX-rate applies at settlement time.\r\nIf no settlement currency is defined the cash flows are settled in the currency in which they are denominated.",
     attribute_type: AttributeType::Text,
 };
 
@@ -872,6 +1207,9 @@ pub const SETTLEMENT_CURRENCY: Attribute = Attribute {
 pub const SETTLEMENT_PERIOD: Attribute = Attribute {
     identifier: "settlementPeriod",
     acronym: "STP",
+    name: "Settlement Period",
+    description:
+        "Defines the period from fixing of a contingent event/obligation (Exercise Date) to settlement of the obligation.\r\n",
     attribute_type: AttributeType::Period,
 };
 
@@ -879,6 +1217,9 @@ pub const SETTLEMENT_PERIOD: Attribute = Attribute {
 pub const STATUS_DATE: Attribute = Attribute {
     identifier: "statusDate",
     acronym: "SD",
+    name: "Status Date",
+    description:
+        "SD holds the date per which all attributes of the record were updated. This is especially important for the highly dynamic attributes like Accruals, Notional, interest rates in variable instruments etc.",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -886,6 +1227,9 @@ pub const STATUS_DATE: Attribute = Attribute {
 pub const TERMINATION_DATE: Attribute = Attribute {
     identifier: "terminationDate",
     acronym: "TD",
+    name: "Termination Date",
+    description:
+        "If a contract is sold before MD (for example a bond on the secondary market) this date has to be set. It refers to the date at which the payment (of PTD) and transfer of the security happens. In other words, TD - if set - takes the role otherwise MD has from a cash flow perspective. \r\nNote, CPID of the CT is not the counterparty of the transaction!",
     attribute_type: AttributeType::Timestamp,
 };
 
@@ -893,6 +1237,8 @@ pub const TERMINATION_DATE: Attribute = Attribute {
 pub const UNIT: Attribute = Attribute {
     identifier: "unit",
     acronym: "UT",
+    name: "Unit",
+    description: "The physical unit of the contract. Example: Barrels for an Oil COM CT.",
     attribute_type: AttributeType::Enum,
 };
 
@@ -900,6 +1246,9 @@ pub const UNIT: Attribute = Attribute {
 pub const VARIATION_MARGIN: Attribute = Attribute {
     identifier: "variationMargin",
     acronym: "MRVM",
+    name: "Variation Margin",
+    description:
+        "MRVM reflects the accrued but not yet paid margin as per SD.  \r\nOpen traded positions are revalued by the exchange at the end of every trading day using mark-to-market valuation. Often clearing members do not credit or debit their clients daily with MRVM, but rather use a Maintenance Margin. If the balance falls outside MRMML (and MRMMU), then  capital must be added (is refunded) to reach the original margin amount MRIM. We can also say that MVO+MRVM is equal to the reference value as per last margin update.",
     attribute_type: AttributeType::Real,
 };
 
@@ -907,6 +1256,9 @@ pub const VARIATION_MARGIN: Attribute = Attribute {
 pub const X_DAY_NOTICE: Attribute = Attribute {
     identifier: "xDayNotice",
     acronym: "XDN",
+    name: "X Day Notice",
+    description:
+        "Used as rolling attribute with the callable CT's UMP and CLM uniquely. CLM's and UMP's will not be settled (MD not set) until the client uses his option to call the contract X_Day_Notice after Current Date. As long as MD or TD is not set, the client postpones his right to call to the future. The cycle is normally defined in number of business days.",
     attribute_type: AttributeType::Period,
 };
 

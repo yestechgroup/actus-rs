@@ -7,8 +7,10 @@ differential conformance harness against the official actusfrf testbeds.
 | Crate | Purpose |
 |-------|---------|
 | `actus-model` | Contract terms vocabulary generated from the ACTUS dictionary; vendored testbed vectors |
-| `actus-engine` | Schedule generation, state variables, event sequencing, day counts; contract types PAM, ANN, LAM, NAM, CEC, CLM, CSH + swaps |
+| `actus-engine` | Schedule generation, state variables, event sequencing, day counts; contract types PAM, ANN, LAM, LAX, NAM, CEC, CLM, CSH, UMP, STK, COM, FXOUT, SWPPV, SWAPS, CAPFL, OPTNS, FUTUR, CEG |
 | `actus-conformance` | Deterministic seeded corpus, oracle, comparator; differential tests vs the actusfrf testbeds |
+| `actus-wasm` | wasm-bindgen bindings: JSON terms → evaluated event schedules, applicability metadata and validation for browsers |
+| `actus-web` | "ACTUS Explorer" web visualizer: WebUI (Microsoft SSR framework) frontend + axum server, driven by `actus-wasm` |
 
 Design properties: **pure** (no I/O, no clock, no randomness — results derive
 from inputs alone), `rust_decimal::Decimal` money, `chrono` timestamps,
@@ -40,6 +42,28 @@ cargo test --workspace        # includes the differential conformance suite
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 ```
+
+## Web visualizer (ACTUS Explorer)
+
+Issue [#1](https://github.com/yestechgroup/actus-rs/issues/1): a browser
+explorer for contract schedules and the ACTUS applicability rules, built on
+[WebUI](https://microsoft.github.io/webui/) (server-side rendered templates,
+hydrated islands) with the contract engine compiled to WASM
+(`crates/actus-wasm`). The server and the browser share one evaluation code
+path, so server-rendered and client-recomputed schedules are identical by
+construction.
+
+```bash
+cd crates/actus-web/assets && npm install && cd ../../..
+wasm-pack build crates/actus-wasm --target web --out-dir pkg
+cargo run -p actus-web --bin build-site
+cargo run -p actus-web --bin actus-web        # http://127.0.0.1:8080
+```
+
+See `crates/actus-web/README.md` for details. Engines for the 18 v1 contract
+types are implemented against `vendor/actus/docs/paper.md`; the eight types
+with official actusfrf testbeds are conformance-gated, the rest carry
+hand-computed golden tests.
 
 ## License
 

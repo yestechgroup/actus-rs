@@ -41,6 +41,7 @@ struct ContractTypeInfo {
     acronym: String,
     identifier: String,
     name: String,
+    family: String,
 }
 
 struct EventTypeInfo {
@@ -54,6 +55,8 @@ struct AttributeInfo {
     const_name: String,
     identifier: String,
     acronym: String,
+    name: String,
+    description: String,
     attribute_type: String,
 }
 
@@ -143,6 +146,9 @@ fn escape_literal(s: &str) -> String {
         match c {
             '\\' => out.push_str("\\\\"),
             '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
             _ => out.push(c),
         }
     }
@@ -156,7 +162,7 @@ fn load_contract_types() -> Result<Vec<ContractTypeInfo>> {
         .and_then(Value::as_object)
         .ok_or_else(|| "taxonomy: missing object `taxonomy`".to_string())?;
 
-    let mut owned: Vec<(String, String, String, String)> = Vec::new();
+    let mut owned: Vec<(String, String, String, String, String)> = Vec::new();
     for (identifier, entry) in taxonomy {
         let status = entry
             .get("status")
@@ -167,16 +173,28 @@ fn load_contract_types() -> Result<Vec<ContractTypeInfo>> {
         }
         let acronym = field_str(entry, "acronym", "taxonomy")?.to_string();
         let name = field_str(entry, "name", "taxonomy")?.to_string();
-        owned.push((identifier.clone(), acronym, name, status.to_string()));
+        let family = entry
+            .get("family")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        owned.push((
+            identifier.clone(),
+            acronym,
+            name,
+            status.to_string(),
+            family,
+        ));
     }
 
     let mut out = Vec::with_capacity(owned.len());
-    for (identifier, acronym, name, status) in owned {
+    for (identifier, acronym, name, status, family) in owned {
         out.push(ContractTypeInfo {
             variant: pascal_from_acronym(&acronym),
             acronym,
             identifier,
             name: format!("{name} ({status})"),
+            family,
         });
     }
     Ok(out)
@@ -283,10 +301,22 @@ fn load_attributes() -> Result<Vec<AttributeInfo>> {
     for (identifier, entry) in terms {
         let acronym = field_str(entry, "acronym", "terms")?.to_string();
         let raw_type = field_str(entry, "type", "terms")?;
+        let name = entry
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let description = entry
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
         out.push(AttributeInfo {
             const_name: screaming_snake(identifier),
             identifier: identifier.clone(),
             acronym,
+            name,
+            description,
             attribute_type: attribute_type_of(raw_type, identifier)?,
         });
     }
@@ -438,6 +468,16 @@ fn render_contract_types(types: &[ContractTypeInfo]) -> String {
             escape_literal(&t.name)
         ));
     }
+    out.push_str("        }\n    }\n\n");
+
+    out.push_str("    /// The taxonomy family, e.g. `Basic`.\n    #[must_use]\n    pub fn family(&self) -> &'static str {\n        match self {\n");
+    for t in types {
+        out.push_str(&format!(
+            "            ContractType::{} => \"{}\",\n",
+            t.variant,
+            escape_literal(&t.family)
+        ));
+    }
     out.push_str("        }\n    }\n}\n\n");
 
     out.push_str("impl fmt::Display for ContractType {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        f.write_str(self.as_acronym())\n    }\n}\n\n");
@@ -539,21 +579,35 @@ fn render_attributes(attributes: &[AttributeInfo]) -> String {
     }
     out.push_str("}\n\n");
 
-    out.push_str("/// One ACTUS dictionary attribute (identifier, acronym and declared type).\n");
+    out.push_str("/// One ACTUS dictionary attribute (identifier, acronym, label, description\n/// and declared type).\n");
     out.push_str("#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]\npub struct Attribute {\n");
     out.push_str("    /// Dictionary identifier (camelCase), e.g. `notionalPrincipal`.\n    pub identifier: &'static str,\n");
     out.push_str("    /// Dictionary acronym, e.g. `NT`.\n    pub acronym: &'static str,\n");
+    out.push_str("    /// Dictionary display name (label), e.g. `Notional Principal`.\n    pub name: &'static str,\n");
+    out.push_str("    /// Dictionary description.\n    pub description: &'static str,\n");
     out.push_str("    /// Dictionary declared type.\n    pub attribute_type: AttributeType,\n");
     out.push_str("}\n\n");
 
     for a in attributes {
+        let escaped_description = escape_literal(&a.description);
+        // Match rustfmt's layout so the generated file is `cargo fmt`-stable:
+        // `    description: "<...>",` inline while it fits the 100-column
+        // budget (4 indent + `description: ` + quotes + comma = 20 chars),
+        // otherwise the value on its own continuation line.
+        let description_field = if escaped_description.len() + 20 <= 100 {
+            format!("    description: \"{escaped_description}\",\n")
+        } else {
+            format!("    description:\n        \"{escaped_description}\",\n")
+        };
         out.push_str(&format!(
-            "/// ACTUS attribute `{}` — identifier `{}`.\npub const {}: Attribute = Attribute {{\n    identifier: \"{}\",\n    acronym: \"{}\",\n    attribute_type: AttributeType::{},\n}};\n\n",
+            "/// ACTUS attribute `{}` — identifier `{}`.\npub const {}: Attribute = Attribute {{\n    identifier: \"{}\",\n    acronym: \"{}\",\n    name: \"{}\",\n{}    attribute_type: AttributeType::{},\n}};\n\n",
             escape_literal(&a.acronym),
             escape_literal(&a.identifier),
             a.const_name,
             escape_literal(&a.identifier),
             escape_literal(&a.acronym),
+            escape_literal(&a.name),
+            description_field,
             a.attribute_type
         ));
     }

@@ -4,6 +4,8 @@ members = [
     "crates/actus-model",
     "crates/actus-engine",
     "crates/actus-conformance",
+    "crates/actus-wasm",
+    "crates/actus-web",
 ]
 
 [workspace.package]
@@ -19,3 +21,6 @@ chrono = { version = "0.4", features = ["serde"] }
 rust_decimal = { version = "1", features = ["serde"] }
 thiserror = "2"
 proptest = "1"
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+microsoft-webui = "0.0.29"

@@ -30,3 +30,35 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Run rustfmt
         run: cargo fmt --all -- --check
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: latest
+      - name: Install frontend dependencies
+        working-directory: crates/actus-web/assets
+        run: npm install
+      - name: Build wasm bindings
+        run: wasm-pack build crates/actus-wasm --target web --out-dir pkg
+      - name: Build site
+        run: cargo run -p actus-web --bin build-site
+      - name: Smoke test server
+        run: |
+          cargo run -p actus-web --bin actus-web &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8080/ >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8080/ | grep -q "ACTUS Explorer"
+          curl -sf http://127.0.0.1:8080/index.js >/dev/null
+          curl -sf http://127.0.0.1:8080/pkg/actus_wasm_bg.wasm >/dev/null

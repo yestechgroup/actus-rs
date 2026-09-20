@@ -184,6 +184,34 @@ impl ContractType {
             ContractType::Ump => "Undefined Maturity Profile (Released)",
         }
     }
+
+    /// The taxonomy family, e.g. `Basic`.
+    #[must_use]
+    pub fn family(&self) -> &'static str {
+        match self {
+            ContractType::Ann => "Basic",
+            ContractType::Bcs => "Combined",
+            ContractType::Clm => "Basic",
+            ContractType::Capfl => "Combined",
+            ContractType::Csh => "Basic",
+            ContractType::Cec => "Credit Enhancement",
+            ContractType::Com => "Basic",
+            ContractType::Cdswp => "Combined",
+            ContractType::Lax => "Basic",
+            ContractType::Fxout => "Combined",
+            ContractType::Futur => "Combined",
+            ContractType::Ceg => "Credit Enhancement",
+            ContractType::Lam => "Basic",
+            ContractType::Mar => "Credit Enhancement",
+            ContractType::Nam => "Basic",
+            ContractType::Optns => "Combined",
+            ContractType::Swppv => "Combined",
+            ContractType::Pam => "Basic",
+            ContractType::Stk => "Basic",
+            ContractType::Swaps => "Combined",
+            ContractType::Ump => "Basic",
+        }
+    }
 }
 
 impl fmt::Display for ContractType {

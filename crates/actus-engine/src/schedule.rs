@@ -348,6 +348,107 @@ pub fn generate_schedule(
         .collect()
 }
 
+/// ACTUS array schedule function (paper §3.2 "Array Schedule").
+///
+/// Concatenates the regular schedules of consecutive segments defined by the
+/// vector-valued inputs `anchors = (s_0, ..., s_m)` and `cycles = (c_0, ...,
+/// c_m)` (paper line 143):
+///
+/// ```text
+/// S̃(s̃, c̃, T) = (S(s_0, c_0, s_1 - c_0), S(s_1, c_1, s_2 - c_1), ..., S(s_m, c_m, T))
+/// ```
+///
+/// Segment `i` (for `i < m`) unrolls `s_i` by `c_i` and terminates one full
+/// period of its own cycle before the next segment starts, `s_{i+1} - c_i`
+/// (computed with [`cycle_back`], so End Of Month snapping applies to the
+/// subtraction), which removes the next anchor from the segment — a plain
+/// `S(s_i, c_i, s_{i+1})` would repeat `s_{i+1}`, the first element of
+/// segment `i + 1`. The final segment unrolls `s_m` by `c_m` to `T`; the
+/// schedule end belongs to the schedule, exactly as in the regular function.
+/// Degenerate single-element arrays (`m = 0`) therefore coincide with the
+/// regular schedule `S(s_0, c_0, T)`.
+///
+/// Conventions: EOM snapping applies per segment through the cycle
+/// arithmetic; business day adjustment shifts every element except the final
+/// element `T` (the contract maturity is never shifted), including the
+/// intermediate segment terminations, which are ordinary schedule points.
+/// Empty inputs yield an empty schedule; extra cycles beyond the anchors and
+/// anchors beyond the cycles (last cycle reused) are tolerated. The stub
+/// indicator of each segment's cycle drives the stub correction of that
+/// segment exactly as in [`generate_schedule`].
+///
+/// Panics under the same conditions as [`generate_schedule`] and
+/// [`cycle_back`]: calendar overflow or a cycle too fine for the segment,
+/// which cannot describe a valid contract schedule.
+pub fn array_schedule(
+    anchors: &[NaiveDateTime],
+    cycles: &[Cycle],
+    end: NaiveDateTime,
+    eomc: EndOfMonthConvention,
+    bdc: BusinessDayConvention,
+    cal: Calendar,
+) -> Vec<NaiveDateTime> {
+    array_series(anchors, cycles, end, eomc, bdc, cal)
+        .into_iter()
+        .map(|(_, emitted)| emitted)
+        .collect()
+}
+
+/// The array schedule as (unshifted schedule date, emission time) pairs.
+///
+/// The unshifted dates are the identity keys of the schedule elements: the
+/// LAX implementation pairs them positionally with the shifted emission
+/// times so `CS*` business day conventions calculate on the raw schedule
+/// date (the same construction as [`crate::common::stub_series_unshifted`]
+/// for the regular schedule). Both halves come from the same segments, so
+/// the pairing is positional and the counts agree by construction.
+pub fn array_series(
+    anchors: &[NaiveDateTime],
+    cycles: &[Cycle],
+    end: NaiveDateTime,
+    eomc: EndOfMonthConvention,
+    bdc: BusinessDayConvention,
+    cal: Calendar,
+) -> Vec<(NaiveDateTime, NaiveDateTime)> {
+    if anchors.is_empty() || cycles.is_empty() {
+        return Vec::new();
+    }
+    let cycle_at = |index: usize| {
+        cycles
+            .get(index)
+            .unwrap_or_else(|| cycles.last().expect("non-empty"))
+    };
+    let mut unshifted: Vec<NaiveDateTime> = Vec::new();
+    for (index, anchor) in anchors.iter().enumerate() {
+        let cycle = cycle_at(index);
+        let termination = match anchors.get(index + 1) {
+            Some(next) => cycle_back(*next, cycle, eomc),
+            None => end,
+        };
+        unshifted.extend(generate_schedule(
+            *anchor,
+            cycle,
+            termination,
+            eomc,
+            BusinessDayConvention::Nos,
+            cal,
+        ));
+    }
+    let last = unshifted.len().saturating_sub(1);
+    unshifted
+        .into_iter()
+        .enumerate()
+        .map(|(position, t)| {
+            let emitted = if position < last {
+                shift_business_day(t, bdc, cal)
+            } else {
+                t
+            };
+            (t, emitted)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -844,5 +945,245 @@ mod tests {
             )
         });
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn array_annual_segments_keep_the_segment_boundaries() {
+        let schedule = array_schedule(
+            &d(&["2026-01-01T00:00:00", "2027-01-01T00:00:00"]),
+            &[
+                cycle(1, CyclePeriod::Year, 0),
+                cycle(1, CyclePeriod::Year, 0),
+            ],
+            t("2028-01-01T00:00:00"),
+            EndOfMonthConvention::Sd,
+            BusinessDayConvention::Nos,
+            Calendar::Nc,
+        );
+        assert_eq!(
+            schedule,
+            d(&[
+                "2026-01-01T00:00:00",
+                "2027-01-01T00:00:00",
+                "2028-01-01T00:00:00",
+            ])
+        );
+    }
+
+    #[test]
+    fn array_monthly_then_quarterly_segments_concatenate_without_duplicates() {
+        let schedule = array_schedule(
+            &d(&["2026-01-01T00:00:00", "2027-01-01T00:00:00"]),
+            &[
+                cycle(1, CyclePeriod::Month, 0),
+                cycle(3, CyclePeriod::Month, 1),
+            ],
+            t("2028-01-01T00:00:00"),
+            EndOfMonthConvention::Sd,
+            BusinessDayConvention::Nos,
+            Calendar::Nc,
+        );
+        // Segment 0 runs monthly to one cycle before the next anchor
+        // (2027-01-01 minus 1M = 2026-12-01); segment 1 rolls quarterly from
+        // 2027-01-01, keeps the overshooting roll (short last stub) and
+        // appends the schedule end.
+        assert_eq!(
+            schedule,
+            d(&[
+                "2026-01-01T00:00:00",
+                "2026-02-01T00:00:00",
+                "2026-03-01T00:00:00",
+                "2026-04-01T00:00:00",
+                "2026-05-01T00:00:00",
+                "2026-06-01T00:00:00",
+                "2026-07-01T00:00:00",
+                "2026-08-01T00:00:00",
+                "2026-09-01T00:00:00",
+                "2026-10-01T00:00:00",
+                "2026-11-01T00:00:00",
+                "2026-12-01T00:00:00",
+                "2027-01-01T00:00:00",
+                "2027-04-01T00:00:00",
+                "2027-07-01T00:00:00",
+                "2027-10-01T00:00:00",
+                "2028-01-01T00:00:00",
+            ])
+        );
+    }
+
+    #[test]
+    fn array_stub_indicator_drives_the_final_segment_termination() {
+        let anchors = d(&["2026-01-01T00:00:00", "2027-06-01T00:00:00"]);
+        let long_last = array_schedule(
+            &anchors,
+            &[
+                cycle(1, CyclePeriod::Month, 0),
+                cycle(3, CyclePeriod::Month, 0),
+            ],
+            t("2027-12-15T00:00:00"),
+            EndOfMonthConvention::Sd,
+            BusinessDayConvention::Nos,
+            Calendar::Nc,
+        );
+        // Long last stub: the 2027-12-01 roll is removed and the final period
+        // is extended to the schedule end.
+        assert_eq!(long_last.len(), 20);
+        assert_eq!(long_last.get(16), Some(&t("2027-05-01T00:00:00")));
+        assert_eq!(
+            &long_last[17..],
+            d(&[
+                "2027-06-01T00:00:00",
+                "2027-09-01T00:00:00",
+                "2027-12-15T00:00:00",
+            ])
+        );
+
+        let short_last = array_schedule(
+            &anchors,
+            &[
+                cycle(1, CyclePeriod::Month, 0),
+                cycle(3, CyclePeriod::Month, 1),
+            ],
+            t("2027-12-15T00:00:00"),
+            EndOfMonthConvention::Sd,
+            BusinessDayConvention::Nos,
+            Calendar::Nc,
+        );
+        // Short last stub: the overshooting roll is kept and the schedule end
+        // is appended after it.
+        assert_eq!(short_last.len(), 21);
+        assert_eq!(short_last.get(19), Some(&t("2027-12-01T00:00:00")));
+        assert_eq!(short_last.last(), Some(&t("2027-12-15T00:00:00")));
+    }
+
+    #[test]
+    fn array_single_segment_degenerates_to_the_regular_schedule() {
+        let anchors = d(&["2023-11-01T00:00:00"]);
+        let cycles = [cycle(3, CyclePeriod::Month, 1)];
+        let end = t("2024-08-01T00:00:00");
+        assert_eq!(
+            array_schedule(
+                &anchors,
+                &cycles,
+                end,
+                EndOfMonthConvention::Sd,
+                BusinessDayConvention::Nos,
+                Calendar::Nc,
+            ),
+            generate_schedule(
+                t("2023-11-01T00:00:00"),
+                &cycles[0],
+                end,
+                EndOfMonthConvention::Sd,
+                BusinessDayConvention::Nos,
+                Calendar::Nc,
+            )
+        );
+    }
+
+    #[test]
+    fn array_empty_inputs_yield_an_empty_schedule() {
+        let anchor = t("2026-01-01T00:00:00");
+        assert!(array_schedule(
+            &[],
+            &[cycle(1, CyclePeriod::Month, 0)],
+            t("2026-07-01T00:00:00"),
+            EndOfMonthConvention::Sd,
+            BusinessDayConvention::Nos,
+            Calendar::Nc,
+        )
+        .is_empty());
+        assert!(array_schedule(
+            &[anchor],
+            &[],
+            t("2026-07-01T00:00:00"),
+            EndOfMonthConvention::Sd,
+            BusinessDayConvention::Nos,
+            Calendar::Nc,
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn array_eom_snaps_short_month_anchor_segments_to_month_ends() {
+        let schedule = array_schedule(
+            &d(&["2026-04-30T00:00:00", "2026-08-31T00:00:00"]),
+            &[
+                cycle(1, CyclePeriod::Month, 0),
+                cycle(1, CyclePeriod::Month, 1),
+            ],
+            t("2026-10-31T00:00:00"),
+            EndOfMonthConvention::Eom,
+            BusinessDayConvention::Nos,
+            Calendar::Nc,
+        );
+        assert_eq!(
+            schedule,
+            d(&[
+                "2026-04-30T00:00:00",
+                "2026-05-31T00:00:00",
+                "2026-06-30T00:00:00",
+                "2026-07-31T00:00:00",
+                "2026-08-31T00:00:00",
+                "2026-09-30T00:00:00",
+                "2026-10-31T00:00:00",
+            ])
+        );
+    }
+
+    #[test]
+    fn array_business_day_shift_moves_mid_schedule_points_but_not_the_end() {
+        // 2026-01-31 and 2026-02-28 are Saturdays; the segment termination
+        // 2026-02-28 is an ordinary schedule point and shifts to the
+        // following Monday, while the schedule end is never shifted.
+        let schedule = array_schedule(
+            &d(&["2026-01-31T00:00:00", "2026-03-31T00:00:00"]),
+            &[
+                cycle(1, CyclePeriod::Month, 0),
+                cycle(1, CyclePeriod::Month, 0),
+            ],
+            t("2026-04-30T00:00:00"),
+            EndOfMonthConvention::Sd,
+            BusinessDayConvention::Scf,
+            Calendar::Mf,
+        );
+        assert_eq!(
+            schedule,
+            d(&[
+                "2026-02-02T00:00:00",
+                "2026-03-02T00:00:00",
+                "2026-03-31T00:00:00",
+                "2026-04-30T00:00:00",
+            ])
+        );
+    }
+
+    #[test]
+    fn array_series_pairs_unshifted_dates_with_emission_times() {
+        let series = array_series(
+            &d(&["2026-01-31T00:00:00", "2026-03-31T00:00:00"]),
+            &[
+                cycle(1, CyclePeriod::Month, 0),
+                cycle(1, CyclePeriod::Month, 0),
+            ],
+            t("2026-04-30T00:00:00"),
+            EndOfMonthConvention::Sd,
+            BusinessDayConvention::Scf,
+            Calendar::Mf,
+        );
+        let unshifted: Vec<NaiveDateTime> = series.iter().map(|(calc, _)| *calc).collect();
+        assert_eq!(
+            unshifted,
+            d(&[
+                "2026-01-31T00:00:00",
+                "2026-02-28T00:00:00",
+                "2026-03-31T00:00:00",
+                "2026-04-30T00:00:00",
+            ])
+        );
+        assert_eq!(
+            series.last().map(|(calc, emit)| (*calc, *emit)),
+            Some((t("2026-04-30T00:00:00"), t("2026-04-30T00:00:00")))
+        );
     }
 }
