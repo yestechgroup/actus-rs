@@ -75,8 +75,24 @@ jobs:
       - name: Install frontend dependencies
         working-directory: crates/actus-web/assets
         run: npm install
+      - name: Typecheck the client
+        working-directory: crates/actus-web/assets
+        run: npm run typecheck
+      - name: Client unit tests (three timezones)
+        working-directory: crates/actus-web/assets
+        run: npm test
       - name: Build wasm bindings
         run: wasm-pack build crates/actus-wasm --target web --out-dir pkg
+      - name: Read the locked wasm-bindgen version
+        id: wasm-bindgen
+        run: |
+          version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | sed -n 's/^version = "\(.*\)"/\1/p')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }}
+      - name: Run binding tests in the wasm runtime (Node)
+        run: cargo test -p actus-wasm --target wasm32-unknown-unknown --test wasm_runtime
       - name: Build site
         run: cargo run -p actus-web --bin build-site
       - name: Smoke test server
