@@ -6,13 +6,15 @@
   "description": "WebUI frontend assets of the ACTUS Explorer (templates, styles, client TypeScript)",
   "scripts": {
     "bundle": "esbuild src/index.ts --bundle --format=esm --target=es2022 --outfile=../dist/index.js --external:/pkg/*",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "TZ=UTC vitest run && TZ=America/New_York vitest run && TZ=Asia/Tokyo vitest run"
   },
   "dependencies": {
     "@microsoft/webui-framework": "0.0.29"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "vitest": "^5.1.2"
   }
 }

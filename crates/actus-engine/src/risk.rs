@@ -178,6 +178,21 @@ mod tests {
         .unwrap()
     }
 
+    /// A provider that overrides nothing observes nothing: every default
+    /// method of the trait is empty.
+    #[test]
+    fn default_provider_methods_observe_nothing() {
+        struct Nothing;
+        impl RiskFactorProvider for Nothing {}
+        let at = chrono::NaiveDate::from_ymd_opt(2020, 1, 1)
+            .and_then(|d| d.and_hms_opt(0, 0, 0))
+            .expect("timestamp");
+        assert_eq!(Nothing.rate("ANY", at), None);
+        assert_eq!(Nothing.index("ANY", at), None);
+        assert!(Nothing.observed_events().is_empty());
+        assert!(Nothing.observed_credit_events().is_empty());
+    }
+
     #[test]
     fn default_provider_observes_nothing() {
         let provider = StateProvider::new();

@@ -31,6 +31,33 @@ jobs:
       - name: Run rustfmt
         run: cargo fmt --all -- --check
 
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Coverage with enforced floor (scripts/coverage.sh)
+        run: scripts/coverage.sh --lcov | tee coverage-summary.txt
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo '### Line coverage'
+            echo '```'
+            grep -E '^(Filename|TOTAL)|^-+$' coverage-summary.txt | head -3 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lcov
+          path: target/lcov.info
+          if-no-files-found: ignore
+
   web:
     runs-on: ubuntu-latest
     steps:
@@ -48,8 +75,24 @@ jobs:
       - name: Install frontend dependencies
         working-directory: crates/actus-web/assets
         run: npm install
+      - name: Typecheck the client
+        working-directory: crates/actus-web/assets
+        run: npm run typecheck
+      - name: Client unit tests (three timezones)
+        working-directory: crates/actus-web/assets
+        run: npm test
       - name: Build wasm bindings
         run: wasm-pack build crates/actus-wasm --target web --out-dir pkg
+      - name: Read the locked wasm-bindgen version
+        id: wasm-bindgen
+        run: |
+          version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | sed -n 's/^version = "\(.*\)"/\1/p')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }}
+      - name: Run binding tests in the wasm runtime (Node)
+        run: cargo test -p actus-wasm --target wasm32-unknown-unknown --test wasm_runtime
       - name: Build site
         run: cargo run -p actus-web --bin build-site
       - name: Smoke test server

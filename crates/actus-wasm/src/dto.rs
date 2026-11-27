@@ -528,6 +528,28 @@ pub fn applicability_json(contract_type: &str) -> Result<String, String> {
         .map_err(|e| format!("serialization failed: {e}"))
 }
 
+/// Core of [`crate::contract_param_specs`]: the editor parameter specs of a
+/// contract type (acronym, case-insensitive) as JSON.
+pub fn param_specs_json(contract_type: &str) -> Result<String, String> {
+    let contract_type: ContractType = contract_type
+        .parse()
+        .map_err(|e: actus_model::ModelError| e.to_string())?;
+    serde_json::to_string(&crate::specs::param_specs(contract_type))
+        .map_err(|e| format!("serialization failed: {e}"))
+}
+
+/// Core of [`crate::build_terms_json`]: builds contract terms JSON from a
+/// contract type and a JSON object of attribute name to raw string value.
+pub fn build_terms_json(contract_type: &str, values_json: &str) -> Result<String, String> {
+    let contract_type: ContractType = contract_type
+        .parse()
+        .map_err(|e: actus_model::ModelError| e.to_string())?;
+    let values: BTreeMap<String, String> =
+        serde_json::from_str(values_json).map_err(|e| format!("invalid values JSON: {e}"))?;
+    serde_json::to_string(&crate::specs::terms_json(contract_type, &values))
+        .map_err(|e| format!("serialization failed: {e}"))
+}
+
 fn is_known_attribute(identifier: &str) -> bool {
     attribute::lookup(identifier).is_some() || identifier == KNOWN_IDENTIFIER_GAP
 }

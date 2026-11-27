@@ -36,8 +36,6 @@
 //! inference, the IPCB and SC series, PRD/TD handling, same-timestamp
 //! sequencing, progressed contracts) mirrors the LAM implementation.
 
-use std::collections::BTreeSet;
-
 use chrono::NaiveDateTime;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
@@ -45,16 +43,20 @@ use rust_decimal::Decimal;
 use actus_model::enums::{ArrayFixVar, ArrayIncDec};
 use actus_model::{
     BusinessDayConvention, Calendar, ContractTerms, ContractType, Cycle, DayCountConvention,
-    EndOfMonthConvention, EventType, InterestCalculationBase, ScalingEffect,
+    EndOfMonthConvention, EventType,
 };
 
 use crate::common::{
-    anchored_series, base_is_nt, base_tracks_notional, calculation_time, initial_base_amount,
-    role_sign, stub_series, stub_series_unshifted, term_scaling_multipliers,
+    base_is_nt, base_tracks_notional, calculation_time, initial_base_amount, role_sign,
+    stub_series, term_scaling_multipliers,
 };
 use crate::daycount::{day_count_fraction, normalize_timestamp};
 use crate::engine::ContractEngine;
 use crate::event::ContractEvent;
+use crate::fixed_income::{
+    self, interest_calculation_base_schedule, interest_schedule, rate_reset_schedule,
+    scales_interest, scales_notional, scaling_index_schedule, Conventions, RateReset, Timing,
+};
 use crate::risk::RiskFactorProvider;
 use crate::schedule::{array_series, cycle_step};
 use crate::state::{ContractState, ContractStatus};
@@ -83,6 +85,11 @@ impl Slot {
             emit,
             segment: 0,
         }
+    }
+
+    /// A slot of `kind` at the calculation and emission times of `timing`.
+    fn timed(kind: Kind, timing: Timing) -> Slot {
+        Slot::at(kind, timing.calc, timing.emit)
     }
 
     fn in_segment(kind: Kind, calc: NaiveDateTime, emit: NaiveDateTime, segment: usize) -> Slot {
@@ -136,22 +143,12 @@ impl Kind {
     }
 }
 
-/// Whether the scaling effect drives the notional scaling multiplier
-/// (techspec `SCEF = [x]N[x]`).
-fn scales_notional(effect: Option<ScalingEffect>) -> bool {
-    matches!(
-        effect,
-        Some(ScalingEffect::Notional) | Some(ScalingEffect::InterestAndNotional)
-    )
-}
-
-/// Whether the scaling effect drives the interest scaling multiplier
-/// (techspec `SCEF = I[x][x]`).
-fn scales_interest(effect: Option<ScalingEffect>) -> bool {
-    matches!(
-        effect,
-        Some(ScalingEffect::Interest) | Some(ScalingEffect::InterestAndNotional)
-    )
+/// Maps a shared rate reset element onto this engine's event kind.
+fn rate_reset_kind(reset: RateReset) -> Kind {
+    match reset {
+        RateReset::Fixed => Kind::RateResetFixed,
+        RateReset::Variable => Kind::RateReset,
+    }
 }
 
 impl ContractEngine for LaxEngine {
@@ -214,6 +211,18 @@ struct Context {
 }
 
 impl Context {
+    /// The schedule conventions shared with [`crate::fixed_income`].
+    fn conventions(&self) -> Conventions {
+        Conventions {
+            t0: self.t0,
+            maturity: self.maturity,
+            dcc: self.dcc,
+            eomc: self.eomc,
+            bdc: self.bdc,
+            cal: self.cal,
+        }
+    }
+
     /// Resolves the attributes every LAX evaluation depends on, including
     /// the maturity inference and the default redemption amount (both the
     /// LAM conventions; the scalar `PRANX`/`PRCL` pair is required only when
@@ -381,20 +390,7 @@ impl Context {
     /// purchase date itself the events preceding `PRD` in the dictionary
     /// sequence mutate the state but are not reported.
     fn observed(&self, t: NaiveDateTime, priority: u8, terms: &ContractTerms) -> bool {
-        if t < self.t0 {
-            return false;
-        }
-        if let Some(prd) = terms.purchase_date {
-            if t < prd || (t == prd && priority < EventType::Purchase.priority()) {
-                return false;
-            }
-        }
-        if let Some(td) = terms.termination_date {
-            if t > td {
-                return false;
-            }
-        }
-        true
+        fixed_income::observed(self.t0, t, Some(priority), terms)
     }
 
     /// Builds the LAX event skeleton in deterministic (calculation time,
@@ -567,35 +563,12 @@ impl Context {
             }
             return;
         }
-        let anchor = anchor.expect("anchor checked above");
-        let cycle = cycle.expect("cycle checked above");
-        let ipci = match terms.capitalization_end_date.map(normalize_timestamp) {
-            Some(ipced) if ipced < self.maturity => {
-                let series = anchored_series(anchor, &cycle, ipced, self.eomc, self.bdc, self.cal);
-                let anchors: BTreeSet<NaiveDateTime> =
-                    series.iter().map(|(unshifted, _)| *unshifted).collect();
-                for (unshifted, emit) in series {
-                    slots.push(Slot::at(
-                        Kind::InterestCapitalization,
-                        calculation_time(self.bdc, unshifted, emit),
-                        emit,
-                    ));
-                }
-                anchors
-            }
-            _ => BTreeSet::new(),
-        };
-        for (unshifted, emit) in
-            stub_series_unshifted(anchor, &cycle, self.maturity, self.eomc, self.bdc, self.cal)
-        {
-            if ipci.contains(&unshifted) {
-                continue;
-            }
-            slots.push(Slot::at(
-                Kind::InterestPayment,
-                calculation_time(self.bdc, unshifted, emit),
-                emit,
-            ));
+        let schedule = interest_schedule(&self.conventions(), terms);
+        for timing in schedule.capitalization {
+            slots.push(Slot::timed(Kind::InterestCapitalization, timing));
+        }
+        for timing in schedule.payment {
+            slots.push(Slot::timed(Kind::InterestPayment, timing));
         }
     }
 
@@ -627,56 +600,16 @@ impl Context {
             }
             return;
         }
-        let anchor = match terms
-            .cycle_anchor_date_of_rate_reset
-            .map(normalize_timestamp)
-        {
-            Some(anchor) => anchor,
-            None => return,
-        };
-        let cycle = match terms.cycle_of_rate_reset.as_ref() {
-            Some(cycle) => cycle,
-            None => return,
-        };
-        let mut series = stub_series(anchor, cycle, self.maturity, self.eomc, self.bdc, self.cal);
-        if series.last().map(|(_, emit)| *emit) == Some(self.maturity) {
-            series.pop();
-        }
-        let mut fixed_pending = terms.next_reset_rate.is_some();
-        for (calc, emit) in series {
-            let kind = if fixed_pending && calc > self.t0 {
-                fixed_pending = false;
-                Kind::RateResetFixed
-            } else {
-                Kind::RateReset
-            };
-            slots.push(Slot::at(kind, calc, emit));
+        for (reset, timing) in rate_reset_schedule(&self.conventions(), terms) {
+            slots.push(Slot::timed(rate_reset_kind(reset), timing));
         }
     }
 
     /// The `SC` scaling index series (as in LAM): `S(SCANX, SCCL, MD)`
     /// without the maturity element.
     fn scaling_index_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
-        if !scales_notional(terms.scaling_effect) && !scales_interest(terms.scaling_effect) {
-            return;
-        }
-        let anchor = match terms
-            .cycle_anchor_date_of_scaling_index
-            .map(normalize_timestamp)
-        {
-            Some(anchor) => anchor,
-            None => return,
-        };
-        let cycle = match terms.cycle_of_scaling_index.as_ref() {
-            Some(cycle) => cycle,
-            None => return,
-        };
-        for (calc, emit) in stub_series(anchor, cycle, self.maturity, self.eomc, self.bdc, self.cal)
-        {
-            if calc == self.maturity {
-                continue;
-            }
-            slots.push(Slot::at(Kind::ScalingIndexFixing, calc, emit));
+        for timing in scaling_index_schedule(&self.conventions(), terms) {
+            slots.push(Slot::timed(Kind::ScalingIndexFixing, timing));
         }
     }
 
@@ -684,26 +617,8 @@ impl Context {
     /// defined only for `IPCB = NTL`, unrolled from `IPCBANX` to maturity
     /// without the maturity element.
     fn interest_calculation_base_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
-        if terms.interest_calculation_base != Some(InterestCalculationBase::Ntl) {
-            return;
-        }
-        let anchor = match terms
-            .cycle_anchor_date_of_interest_calculation_base
-            .map(normalize_timestamp)
-        {
-            Some(anchor) => anchor,
-            None => return,
-        };
-        let cycle = match terms.cycle_of_interest_calculation_base.as_ref() {
-            Some(cycle) => cycle,
-            None => return,
-        };
-        for (calc, emit) in stub_series(anchor, cycle, self.maturity, self.eomc, self.bdc, self.cal)
-        {
-            if calc == self.maturity {
-                continue;
-            }
-            slots.push(Slot::at(Kind::InterestCalculationBaseFixing, calc, emit));
+        for timing in interest_calculation_base_schedule(&self.conventions(), terms) {
+            slots.push(Slot::timed(Kind::InterestCalculationBaseFixing, timing));
         }
     }
 
@@ -762,7 +677,8 @@ impl Context {
                 let premium = terms.premium_discount_at_ied.unwrap_or(Decimal::ZERO);
                 state.notional_principal = self.sgn * notional;
                 state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
-                state.accrued_interest = initial_accrued(terms, state, slot.calc, self)?;
+                state.accrued_interest =
+                    fixed_income::initial_accrued(terms, state, slot.calc, self.dcc, Decimal::ONE)?;
                 state.next_principal_redemption_payment = self.scheduled_redemption(0, state);
                 let (interest_scaling, notional_scaling) = term_scaling_multipliers(terms);
                 state.interest_scaling_multiplier = interest_scaling;
@@ -947,27 +863,6 @@ impl Context {
     }
 }
 
-/// The accrued interest state at `IED` (techspec LAM functions table, IED
-/// row): the terms value when present, otherwise the accrual since `IPANX`
-/// when the anchor precedes the initial exchange, otherwise zero.
-fn initial_accrued(
-    terms: &ContractTerms,
-    state: &ContractState,
-    ied: NaiveDateTime,
-    ctx: &Context,
-) -> Result<Decimal, EngineError> {
-    if let Some(accrued) = terms.accrued_interest {
-        return Ok(accrued);
-    }
-    if let Some(anchor) = terms.cycle_anchor_date_of_interest_payment {
-        if anchor < ied {
-            let yf = day_count_fraction(anchor, ied, ctx.dcc)?;
-            return Ok(yf * state.notional_principal * state.nominal_interest_rate);
-        }
-    }
-    Ok(Decimal::ZERO)
-}
-
 /// Builds the pre-initial-exchange-date state (techspec LAM states table,
 /// `Ipcb` row: `t0 < IED` yields a zeroed calculation base): the redemption
 /// amount and scaling multipliers are already resolved from the terms, the
@@ -1009,46 +904,15 @@ fn progressed_initial(ctx: &Context, terms: &ContractTerms) -> Result<ContractSt
         None => Decimal::ZERO,
         Some(_) => match terms.accrued_interest {
             Some(accrued) => accrued,
-            None => progressed_accrued(ctx, terms, state.interest_calculation_base_amount)?
-                .unwrap_or(Decimal::ZERO),
+            None => fixed_income::progressed_accrued(
+                &ctx.conventions(),
+                terms,
+                state.interest_calculation_base_amount,
+            )?
+            .unwrap_or(Decimal::ZERO),
         },
     };
     Ok(state)
-}
-
-/// The accrued interest of a progressed contract from the last interest
-/// schedule point `t-` before the status date; `None` when no schedule point
-/// precedes the status date.
-fn progressed_accrued(
-    ctx: &Context,
-    terms: &ContractTerms,
-    base_amount: Decimal,
-) -> Result<Option<Decimal>, EngineError> {
-    let anchor = match terms
-        .cycle_anchor_date_of_interest_payment
-        .map(normalize_timestamp)
-    {
-        Some(anchor) => anchor,
-        None => return Ok(None),
-    };
-    let cycle = match terms.cycle_of_interest_payment.as_ref() {
-        Some(cycle) => cycle,
-        None => return Ok(None),
-    };
-    let previous = stub_series(anchor, cycle, ctx.maturity, ctx.eomc, ctx.bdc, ctx.cal)
-        .into_iter()
-        .map(|(calc, _)| calc)
-        .filter(|t| *t < ctx.t0)
-        .max();
-    match previous {
-        Some(t_minus) => {
-            let yf = day_count_fraction(t_minus, ctx.t0, ctx.dcc)?;
-            Ok(Some(
-                yf * base_amount * terms.nominal_interest_rate.unwrap_or(Decimal::ZERO),
-            ))
-        }
-        None => Ok(None),
-    }
 }
 
 #[cfg(test)]
@@ -1329,5 +1193,163 @@ mod tests {
         assert_eq!(resets[3].time, t("2026-07-01T00:00:00"));
         assert_eq!(resets[3].state.nominal_interest_rate, dec!(0.09));
         assert!(resets.iter().all(|e| e.payoff == Decimal::ZERO));
+    }
+
+    /// A one-year LAX with quarterly array redemptions and a two-segment
+    /// rate array; `extra` overrides or adds attributes.
+    fn array_rate_contract(extra: serde_json::Value) -> ContractTerms {
+        let mut raw = json!({
+            "contractType": "LAX",
+            "contractRole": "RPA",
+            "statusDate": "2025-12-30T00:00:00",
+            "initialExchangeDate": "2026-01-01T00:00:00",
+            "maturityDate": "2027-01-01T00:00:00",
+            "notionalPrincipal": "1200",
+            "nominalInterestRate": "0.08",
+            "arrayCycleAnchorDateOfPrincipalRedemption": ["2026-01-01T00:00:00"],
+            "arrayCycleOfPrincipalRedemption": ["P3ML1"],
+            "arrayNextPrincipalRedemptionPayment": ["100"],
+            "arrayCycleAnchorDateOfRateReset":
+                ["2026-01-01T00:00:00", "2026-07-01T00:00:00"],
+            "arrayCycleOfRateReset": ["P2ML0", "P6ML0"],
+            "arrayRate": ["0.05", "0.09"],
+            "cycleAnchorDateOfInterestPayment": "2026-01-01T00:00:00",
+            "cycleOfInterestPayment": "P3ML1",
+            "dayCountConvention": "A365",
+            "interestCalculationBase": "NT"
+        });
+        for (key, value) in extra.as_object().expect("object") {
+            raw[key] = value.clone();
+        }
+        terms(raw)
+    }
+
+    #[test]
+    fn variable_array_rate_adds_the_segment_spread_to_the_observed_rate() {
+        let terms = array_rate_contract(json!({
+            "arrayFixedVariable": "V",
+            "marketObjectCodeOfRateReset": "IDX",
+            "rateMultiplier": "2"
+        }));
+        let risk = StateProvider::new()
+            .with_rate("IDX", t("2026-01-01T00:00:00"), dec!(0.01))
+            .with_rate("IDX", t("2026-07-01T00:00:00"), dec!(0.02));
+        let events = LaxEngine.evaluate(&terms, &risk).expect("events");
+        let rates: Vec<(NaiveDateTime, Decimal)> = events
+            .iter()
+            .filter(|e| e.event_type == EventType::RateResetVariable)
+            .map(|e| (e.time, e.state.nominal_interest_rate))
+            .collect();
+        assert_eq!(
+            rates,
+            vec![
+                // Segment 0: 2 x 0.01 + 0.05.
+                (t("2026-01-01T00:00:00"), dec!(0.07)),
+                (t("2026-03-01T00:00:00"), dec!(0.07)),
+                (t("2026-05-01T00:00:00"), dec!(0.07)),
+                // Segment 1: 2 x 0.02 + 0.09.
+                (t("2026-07-01T00:00:00"), dec!(0.13)),
+            ]
+        );
+    }
+
+    #[test]
+    fn variable_array_rate_needs_a_market_object_and_an_observation() {
+        let missing_code = array_rate_contract(json!({ "arrayFixedVariable": "V" }));
+        assert!(matches!(
+            LaxEngine.evaluate(&missing_code, &StateProvider::new()),
+            Err(EngineError::MissingAttribute("marketObjectCodeOfRateReset"))
+        ));
+        let unobserved = array_rate_contract(json!({
+            "arrayFixedVariable": "V",
+            "marketObjectCodeOfRateReset": "IDX"
+        }));
+        match LaxEngine.evaluate(&unobserved, &StateProvider::new()) {
+            Err(EngineError::RiskFactorMissing { code, .. }) => assert_eq!(code, "IDX"),
+            other => panic!("expected RiskFactorMissing, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn interest_array_schedules_interest_on_the_array_dates() {
+        let mut terms = array_rate_contract(json!({
+            "arrayCycleAnchorDateOfInterestPayment":
+                ["2026-01-01T00:00:00", "2026-07-01T00:00:00"],
+            "arrayCycleOfInterestPayment": ["P6ML1", "P1ML1"]
+        }));
+        terms.array_cycle_anchor_date_of_rate_reset = None;
+        terms.array_cycle_of_rate_reset = None;
+        terms.array_rate = None;
+        let events = LaxEngine
+            .evaluate(&terms, &StateProvider::new())
+            .expect("events");
+        let ip: Vec<NaiveDateTime> = events
+            .iter()
+            .filter(|e| e.event_type == EventType::InterestPayment)
+            .map(|e| e.time)
+            .collect();
+        // Segment 0 is semiannual (one IP at 2026-01-01, the anchor, then
+        // segment 1 takes over monthly from 2026-07-01 to maturity).
+        assert_eq!(ip.first(), Some(&t("2026-01-01T00:00:00")));
+        assert!(ip.contains(&t("2026-07-01T00:00:00")));
+        assert!(ip.contains(&t("2026-08-01T00:00:00")));
+        assert!(ip.contains(&t("2026-12-01T00:00:00")));
+        assert!(!ip.contains(&t("2026-04-01T00:00:00")));
+        assert!(ip.iter().all(|time| *time <= t("2027-01-01T00:00:00")));
+        // Interest is paid on every IP event; total accrual is positive.
+        let paid: Decimal = events
+            .iter()
+            .filter(|e| e.event_type == EventType::InterestPayment)
+            .map(|e| e.payoff)
+            .sum();
+        assert!(paid > Decimal::ZERO);
+    }
+
+    #[test]
+    fn without_an_interest_cycle_interest_follows_the_redemption_dates() {
+        let mut terms = array_rate_contract(json!({}));
+        terms.cycle_anchor_date_of_interest_payment = None;
+        terms.cycle_of_interest_payment = None;
+        terms.array_cycle_anchor_date_of_rate_reset = None;
+        terms.array_cycle_of_rate_reset = None;
+        terms.array_rate = None;
+        let events = LaxEngine
+            .evaluate(&terms, &StateProvider::new())
+            .expect("events");
+        let pr: Vec<NaiveDateTime> = events
+            .iter()
+            .filter(|e| e.event_type == EventType::PrincipalRedemption)
+            .map(|e| e.time)
+            .collect();
+        let ip: Vec<NaiveDateTime> = events
+            .iter()
+            .filter(|e| e.event_type == EventType::InterestPayment)
+            .map(|e| e.time)
+            .collect();
+        assert!(!pr.is_empty());
+        for time in &pr {
+            assert!(ip.contains(time), "IP expected at redemption date {time}");
+        }
+        // The final accrual is paid at maturity.
+        assert_eq!(ip.last(), Some(&t("2027-01-01T00:00:00")));
+    }
+
+    #[test]
+    fn missing_redemption_terms_are_reported_not_panicked() {
+        let mut no_payment = array_rate_contract(json!({}));
+        no_payment.array_next_principal_redemption_payment = None;
+        no_payment.array_cycle_anchor_date_of_principal_redemption = None;
+        no_payment.array_cycle_of_principal_redemption = None;
+        no_payment.maturity_date = None;
+        assert!(matches!(
+            LaxEngine.evaluate(&no_payment, &StateProvider::new()),
+            Err(EngineError::MissingAttribute(_))
+        ));
+        let mut no_ied = array_rate_contract(json!({}));
+        no_ied.initial_exchange_date = None;
+        assert!(matches!(
+            LaxEngine.evaluate(&no_ied, &StateProvider::new()),
+            Err(EngineError::MissingAttribute("initialExchangeDate"))
+        ));
     }
 }

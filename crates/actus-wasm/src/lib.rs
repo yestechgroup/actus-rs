@@ -82,7 +82,6 @@
 pub mod dto;
 pub mod specs;
 
-use std::collections::BTreeMap;
 use wasm_bindgen::prelude::*;
 
 /// Metadata of every released/implemented contract type as a JSON array.
@@ -167,11 +166,7 @@ pub fn evaluate_with_risk(terms_json: String, scenario_json: String) -> Result<S
 /// The acronym is not a known contract type.
 #[wasm_bindgen]
 pub fn contract_param_specs(contract_type: String) -> Result<String, JsValue> {
-    let t: actus_model::ContractType = contract_type
-        .parse()
-        .map_err(|e: actus_model::ModelError| JsValue::from_str(&e.to_string()))?;
-    serde_json::to_string(&specs::param_specs(t))
-        .map_err(|e| JsValue::from_str(&format!("serialization failed: {e}")))
+    dto::param_specs_json(&contract_type).map_err(|e| JsValue::from_str(&e))
 }
 
 /// Builds the contract terms JSON (string) for one contract type from form
@@ -182,11 +177,5 @@ pub fn contract_param_specs(contract_type: String) -> Result<String, JsValue> {
 /// The acronym is not a known contract type.
 #[wasm_bindgen]
 pub fn build_terms_json(contract_type: String, values_json: String) -> Result<String, JsValue> {
-    let t: actus_model::ContractType = contract_type
-        .parse()
-        .map_err(|e: actus_model::ModelError| JsValue::from_str(&e.to_string()))?;
-    let values: BTreeMap<String, String> = serde_json::from_str(&values_json)
-        .map_err(|e| JsValue::from_str(&format!("invalid values JSON: {e}")))?;
-    serde_json::to_string(&specs::terms_json(t, &values))
-        .map_err(|e| JsValue::from_str(&format!("serialization failed: {e}")))
+    dto::build_terms_json(&contract_type, &values_json).map_err(|e| JsValue::from_str(&e))
 }

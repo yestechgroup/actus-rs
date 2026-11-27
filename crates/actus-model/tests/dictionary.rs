@@ -82,6 +82,15 @@ fn event_type_covers_the_event_dictionary() {
         let digits: String = sequence.chars().filter(|c| c.is_ascii_digit()).collect();
         let expected_priority: u8 = digits.parse().expect("sequence priority");
         assert_eq!(event.priority(), expected_priority, "priority of {acronym}");
+        let identifier = entry["identifier"].as_str().expect("identifier");
+        assert_eq!(event.identifier(), identifier, "identifier of {acronym}");
+    }
+    match "XYZ".parse::<EventType>() {
+        Err(actus_model::ModelError::UnknownEnumValue { vocabulary, value }) => {
+            assert_eq!(vocabulary, "EventType");
+            assert_eq!(value, "XYZ");
+        }
+        other => panic!("expected UnknownEnumValue, got {other:?}"),
     }
 }
 

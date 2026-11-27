@@ -143,8 +143,13 @@ export function formatMoneyShort(value: number, signed: boolean): string {
   return `${sign}${text}`;
 }
 
+/** Epoch ms of an event timestamp. Event dates are naive UTC
+ * (`YYYY-MM-DDTHH:MM:SS`, as rendered by the server in state.rs); without an
+ * explicit offset `Date.parse` would read them in the browser's timezone,
+ * shifting positions across DST changes and dropping year ticks. */
 function timestampMs(dateText: string): number {
-  return Date.parse(dateText);
+  const hasOffset = /(?:[zZ]|[+-]\d\d:\d\d)$/.test(dateText);
+  return Date.parse(dateText.length > 10 && !hasOffset ? `${dateText}Z` : dateText);
 }
 
 export function buildEventViews(events: EventDto[]): EventView[] {
@@ -215,17 +220,19 @@ export interface CalendarView {
  * Mirrors `parse_iso_period_days` in state.rs. */
 export function parseIsoPeriodDays(raw: string | undefined | null): number | null {
   if (!raw) return null;
-  const rest = raw.trim().slice(1);
-  if (!raw.trim().startsWith('P') || !rest) return null;
+  const trimmed = raw.trim();
+  const rest = trimmed.slice(1);
+  if (!trimmed.startsWith('P') || !rest) return null;
   const factors: Record<string, number> = { D: 1, W: 7, M: 30, Y: 365 };
   const re = /(\d+)([DWMY])/g;
   let total = 0;
   let matched = 0;
-  for (const m of raw.matchAll(re)) {
+  for (const m of rest.matchAll(re)) {
     total += Number(m[1]) * factors[m[2]];
     matched += m[0].length;
   }
-  return matched === raw.trim().length ? total : null;
+  // Every character after the `P` must belong to a `<digits><unit>` pair.
+  return matched === rest.length ? total : null;
 }
 
 /** Epoch ms of UTC midnight of the day in an `YYYY-MM-DD[THH:MM:SS]`
