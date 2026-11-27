@@ -390,7 +390,7 @@ impl Context {
     /// purchase date itself the events preceding `PRD` in the dictionary
     /// sequence mutate the state but are not reported.
     fn observed(&self, t: NaiveDateTime, priority: u8, terms: &ContractTerms) -> bool {
-        fixed_income::observed(self.t0, t, Some(priority), terms)
+        fixed_income::observed(self.t0, t, priority, terms)
     }
 
     /// Builds the LAX event skeleton in deterministic (calculation time,
@@ -678,7 +678,7 @@ impl Context {
                 state.notional_principal = self.sgn * notional;
                 state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
                 state.accrued_interest =
-                    fixed_income::initial_accrued(terms, state, slot.calc, self.dcc, Decimal::ONE)?;
+                    fixed_income::initial_accrued(terms, state, slot.calc, self.dcc, self.sgn)?;
                 state.next_principal_redemption_payment = self.scheduled_redemption(0, state);
                 let (interest_scaling, notional_scaling) = term_scaling_multipliers(terms);
                 state.interest_scaling_multiplier = interest_scaling;
@@ -903,7 +903,7 @@ fn progressed_initial(ctx: &Context, terms: &ContractTerms) -> Result<ContractSt
     state.accrued_interest = match terms.nominal_interest_rate {
         None => Decimal::ZERO,
         Some(_) => match terms.accrued_interest {
-            Some(accrued) => accrued,
+            Some(accrued) => ctx.sgn * accrued,
             None => fixed_income::progressed_accrued(
                 &ctx.conventions(),
                 terms,

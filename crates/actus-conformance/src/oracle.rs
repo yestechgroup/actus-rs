@@ -493,7 +493,7 @@ fn evaluate_family(
                 let premium = money_of(terms.premium_discount_at_ied.unwrap_or(Decimal::ZERO))?;
                 state.notional = sgn * notional;
                 state.rate = rate_of(terms.nominal_interest_rate.unwrap_or(Decimal::ZERO))?;
-                state.accrued = initial_accrued(terms, ied, dcc, state.notional, state.rate)?;
+                state.accrued = initial_accrued(terms, ied, dcc, state.notional, state.rate, sgn)?;
                 match family {
                     Family::Lam => {
                         state.next_principal_redemption = money_of(
@@ -711,9 +711,13 @@ fn initial_accrued(
     dcc: DayCountConvention,
     notional: i128,
     rate: i128,
+    sgn: i128,
 ) -> Result<i128, String> {
+    // The carried attribute is unsigned; the state is role-signed (the
+    // official nam04 fixture pins this). The accrual below is signed through
+    // the already-signed notional.
     if let Some(carried) = terms.accrued_interest {
-        return money_of(carried);
+        return Ok(sgn * money_of(carried)?);
     }
     if let Some(anchor) = terms.cycle_anchor_date_of_interest_payment {
         if anchor < ied {
