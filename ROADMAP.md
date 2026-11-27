@@ -36,7 +36,7 @@ issues (it needs `gh` with write access).
   are generated from the vendored ACTUS dictionary v1.4, and tests check that
   the generated code covers the dictionary exactly.
 - **Engines exist for 18 of the 21 dictionary contract types.**
-- **Tests:** about 356, all green in about 1 s. Workspace line coverage is
+- **Tests:** 336, all green in about 1 s. Workspace line coverage is
   **88.2 %** (cargo-llvm-cov).
 
 ### Gaps and risks
