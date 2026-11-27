@@ -30,8 +30,6 @@
 //!   evaluated progressed from `t0` with the states-at-t0 initialisation
 //!   (pam13).
 
-use std::collections::BTreeSet;
-
 use chrono::NaiveDateTime;
 use rust_decimal::Decimal;
 
@@ -40,12 +38,13 @@ use actus_model::{
     EndOfMonthConvention, EventType,
 };
 
-use crate::common::{
-    anchored_series, calculation_time, role_sign, stub_series, stub_series_unshifted,
-};
+use crate::common::role_sign;
 use crate::daycount::{day_count_fraction, normalize_timestamp};
 use crate::engine::ContractEngine;
 use crate::event::ContractEvent;
+use crate::fixed_income::{
+    self, interest_schedule, rate_reset_schedule, Conventions, RateReset, Timing,
+};
 use crate::risk::RiskFactorProvider;
 use crate::state::{ContractState, ContractStatus};
 use crate::EngineError;
@@ -62,6 +61,17 @@ struct Slot {
     kind: Kind,
     calc: NaiveDateTime,
     emit: NaiveDateTime,
+}
+
+impl Slot {
+    /// A slot of `kind` at the calculation and emission times of `timing`.
+    fn timed(kind: Kind, timing: Timing) -> Slot {
+        Slot {
+            kind,
+            calc: timing.calc,
+            emit: timing.emit,
+        }
+    }
 }
 
 /// PAM event kinds, mapped onto the dictionary event types.
@@ -95,6 +105,14 @@ impl Kind {
     /// The dictionary event sequence number driving same-timestamp order.
     fn priority(self) -> u8 {
         self.event_type().priority()
+    }
+}
+
+/// Maps a shared rate reset element onto this engine's event kind.
+fn rate_reset_kind(reset: RateReset) -> Kind {
+    match reset {
+        RateReset::Fixed => Kind::RateResetFixed,
+        RateReset::Variable => Kind::RateReset,
     }
 }
 
@@ -151,6 +169,18 @@ struct Context {
 }
 
 impl Context {
+    /// The schedule conventions shared with [`crate::fixed_income`].
+    fn conventions(&self) -> Conventions {
+        Conventions {
+            t0: self.t0,
+            maturity: self.maturity,
+            dcc: self.dcc,
+            eomc: self.eomc,
+            bdc: self.bdc,
+            cal: self.cal,
+        }
+    }
+
     /// Resolves the attributes every PAM evaluation depends on.
     fn new(terms: &ContractTerms) -> Result<Context, EngineError> {
         let ied = terms
@@ -183,20 +213,7 @@ impl Context {
     /// status date (progressed contracts) and at the purchase date when `PRD`
     /// is set, and ends at termination when `TD` is set.
     fn observed(&self, t: NaiveDateTime, terms: &ContractTerms) -> bool {
-        if t < self.t0 {
-            return false;
-        }
-        if let Some(prd) = terms.purchase_date {
-            if t < prd {
-                return false;
-            }
-        }
-        if let Some(td) = terms.termination_date {
-            if t > td {
-                return false;
-            }
-        }
-        true
+        fixed_income::observed(self.t0, t, None, terms)
     }
 
     /// Builds the PAM event skeleton in deterministic (calculation time,
@@ -250,44 +267,12 @@ impl Context {
     /// end never shifts), so only the unshifted dates identify the shared
     /// schedule points.
     fn interest_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
-        let anchor = match terms
-            .cycle_anchor_date_of_interest_payment
-            .map(normalize_timestamp)
-        {
-            Some(anchor) => anchor,
-            None => return,
-        };
-        let cycle = match terms.cycle_of_interest_payment.as_ref() {
-            Some(cycle) => cycle,
-            None => return,
-        };
-        let ipci = match terms.capitalization_end_date.map(normalize_timestamp) {
-            Some(ipced) if ipced < self.maturity => {
-                let series = anchored_series(anchor, cycle, ipced, self.eomc, self.bdc, self.cal);
-                let anchors: BTreeSet<NaiveDateTime> =
-                    series.iter().map(|(unshifted, _)| *unshifted).collect();
-                for (unshifted, emit) in series {
-                    slots.push(Slot {
-                        kind: Kind::InterestCapitalization,
-                        calc: calculation_time(self.bdc, unshifted, emit),
-                        emit,
-                    });
-                }
-                anchors
-            }
-            _ => BTreeSet::new(),
-        };
-        for (unshifted, emit) in
-            stub_series_unshifted(anchor, cycle, self.maturity, self.eomc, self.bdc, self.cal)
-        {
-            if ipci.contains(&unshifted) {
-                continue;
-            }
-            slots.push(Slot {
-                kind: Kind::InterestPayment,
-                calc: calculation_time(self.bdc, unshifted, emit),
-                emit,
-            });
+        let schedule = interest_schedule(&self.conventions(), terms);
+        for timing in schedule.capitalization {
+            slots.push(Slot::timed(Kind::InterestCapitalization, timing));
+        }
+        for timing in schedule.payment {
+            slots.push(Slot::timed(Kind::InterestPayment, timing));
         }
     }
 
@@ -299,30 +284,8 @@ impl Context {
     /// first schedule point after the status date becomes a fixed reset `RRF`
     /// applying `RRNXT` instead of a market observation.
     fn rate_reset_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
-        let anchor = match terms
-            .cycle_anchor_date_of_rate_reset
-            .map(normalize_timestamp)
-        {
-            Some(anchor) => anchor,
-            None => return,
-        };
-        let cycle = match terms.cycle_of_rate_reset.as_ref() {
-            Some(cycle) => cycle,
-            None => return,
-        };
-        let mut series = stub_series(anchor, cycle, self.maturity, self.eomc, self.bdc, self.cal);
-        if series.last().map(|(_, emit)| *emit) == Some(self.maturity) {
-            series.pop();
-        }
-        let mut fixed_pending = terms.next_reset_rate.is_some();
-        for (calc, emit) in series {
-            let kind = if fixed_pending && calc > self.t0 {
-                fixed_pending = false;
-                Kind::RateResetFixed
-            } else {
-                Kind::RateReset
-            };
-            slots.push(Slot { kind, calc, emit });
+        for (reset, timing) in rate_reset_schedule(&self.conventions(), terms) {
+            slots.push(Slot::timed(rate_reset_kind(reset), timing));
         }
     }
 
@@ -345,7 +308,8 @@ impl Context {
                 let premium = terms.premium_discount_at_ied.unwrap_or(Decimal::ZERO);
                 state.notional_principal = self.sgn * notional;
                 state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
-                state.accrued_interest = initial_accrued(terms, state, slot.calc, self)?;
+                state.accrued_interest =
+                    fixed_income::initial_accrued(terms, state, slot.calc, self.dcc, Decimal::ONE)?;
                 self.sgn * -(notional + premium)
             }
             Kind::InterestPayment => {
@@ -416,27 +380,6 @@ impl Context {
     }
 }
 
-/// The accrued interest state at `IED` (techspec PAM functions table, IED
-/// row): the terms value when present, otherwise the accrual since `IPANX`
-/// when the anchor precedes the initial exchange, otherwise zero.
-fn initial_accrued(
-    terms: &ContractTerms,
-    state: &ContractState,
-    ied: NaiveDateTime,
-    ctx: &Context,
-) -> Result<Decimal, EngineError> {
-    if let Some(accrued) = terms.accrued_interest {
-        return Ok(accrued);
-    }
-    if let Some(anchor) = terms.cycle_anchor_date_of_interest_payment {
-        if anchor < ied {
-            let yf = day_count_fraction(anchor, ied, ctx.dcc)?;
-            return Ok(yf * state.notional_principal * state.nominal_interest_rate);
-        }
-    }
-    Ok(Decimal::ZERO)
-}
-
 /// Builds the states-at-t0 of a progressed contract whose `IED` precedes the
 /// status date (techspec PAM states table): the notional and rate are live
 /// (`sgn x NT`, `IPNR`), and the accrued interest accrues from the last
@@ -454,47 +397,16 @@ fn progressed_initial(ctx: &Context, terms: &ContractTerms) -> Result<ContractSt
         Some(_) => match terms.accrued_interest {
             Some(accrued) => accrued,
             None => {
-                let accrual = progressed_accrued(ctx, terms, state.notional_principal)?;
+                let accrual = fixed_income::progressed_accrued(
+                    &ctx.conventions(),
+                    terms,
+                    state.notional_principal,
+                )?;
                 accrual.unwrap_or(Decimal::ZERO)
             }
         },
     };
     Ok(state)
-}
-
-/// The accrued interest of a progressed contract from the last interest
-/// schedule point `t-` before the status date; `None` when no schedule point
-/// precedes the status date.
-fn progressed_accrued(
-    ctx: &Context,
-    terms: &ContractTerms,
-    notional: Decimal,
-) -> Result<Option<Decimal>, EngineError> {
-    let anchor = match terms
-        .cycle_anchor_date_of_interest_payment
-        .map(normalize_timestamp)
-    {
-        Some(anchor) => anchor,
-        None => return Ok(None),
-    };
-    let cycle = match terms.cycle_of_interest_payment.as_ref() {
-        Some(cycle) => cycle,
-        None => return Ok(None),
-    };
-    let previous = stub_series(anchor, cycle, ctx.maturity, ctx.eomc, ctx.bdc, ctx.cal)
-        .into_iter()
-        .map(|(calc, _)| calc)
-        .filter(|t| *t < ctx.t0)
-        .max();
-    match previous {
-        Some(t_minus) => {
-            let yf = day_count_fraction(t_minus, ctx.t0, ctx.dcc)?;
-            Ok(Some(
-                yf * notional * terms.nominal_interest_rate.unwrap_or(Decimal::ZERO),
-            ))
-        }
-        None => Ok(None),
-    }
 }
 
 #[cfg(test)]

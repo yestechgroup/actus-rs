@@ -35,6 +35,7 @@ pub mod csh;
 pub mod daycount;
 pub mod engine;
 pub mod event;
+pub(crate) mod fixed_income;
 pub mod futur;
 pub mod fxout;
 pub mod lam;
