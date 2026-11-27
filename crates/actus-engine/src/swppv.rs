@@ -52,6 +52,7 @@ use crate::lam::LamEngine;
 use crate::nam::NamEngine;
 use crate::pam::PamEngine;
 use crate::risk::RiskFactorProvider;
+use crate::swaps::merge_congruent;
 use crate::EngineError;
 
 /// Implementation of the SWPPV contract type.
@@ -267,32 +268,6 @@ fn degenerate_leg(
     leg.rate_multiplier = terms.rate_multiplier;
     leg.rate_spread = terms.rate_spread;
     Ok(leg)
-}
-
-/// Merges congruent events into net-settled events (paper §7.12).
-///
-/// `stream` arrives sorted, so congruent events (same time and event type)
-/// are adjacent and one fold pass suffices. The net payoff and notional sum
-/// the leg values; the interest-bearing states collapse to the parent's own
-/// values (`IPNR` of the parent is the fixed rate, `IPAC` its terms value,
-/// typically unset). Non-congruent events pass through untouched.
-fn merge_congruent(terms: &ContractTerms, stream: Vec<ContractEvent>) -> Vec<ContractEvent> {
-    let parent_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
-    let parent_accrued = terms.accrued_interest.unwrap_or(Decimal::ZERO);
-    let mut merged: Vec<ContractEvent> = Vec::with_capacity(stream.len());
-    for event in stream {
-        if let Some(last) = merged.last_mut() {
-            if last.time == event.time && last.event_type == event.event_type {
-                last.payoff += event.payoff;
-                last.state.notional_principal += event.state.notional_principal;
-                last.state.nominal_interest_rate = parent_rate;
-                last.state.accrued_interest = parent_accrued;
-                continue;
-            }
-        }
-        merged.push(event);
-    }
-    merged
 }
 
 #[cfg(test)]

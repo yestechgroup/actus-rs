@@ -318,8 +318,9 @@ pub mod timestamp_vec_option {
 }
 
 /// Deserialize `Option<Vec<Decimal>>` from a JSON array of ACTUS decimals
-/// (strings, numbers or null elements) or null; serialize back to decimal
-/// strings. Array-valued attributes (`ARPRNXT`, `ARRATE`) use this helper.
+/// (strings or numbers) or null; serialize back to decimal strings.
+/// Array-valued attributes (`ARPRNXT`, `ARRATE`) use this helper. A `null`
+/// element is rejected: the arrays are positional, one value per segment.
 pub mod decimal_vec_option {
     use super::*;
     use serde::de::Error as DeError;
@@ -342,8 +343,19 @@ pub mod decimal_vec_option {
             {
                 let mut out = Vec::new();
                 while let Some(raw) = seq.next_element::<serde_json::Value>()? {
+                    // Array attributes are positional: element `i` belongs to
+                    // schedule segment `i`. A missing element cannot be
+                    // dropped (every later value would move one segment
+                    // earlier), so `null` is an error.
                     match decimal_from_value(&raw) {
-                        Ok(value) => out.extend(value),
+                        Ok(Some(value)) => out.push(value),
+                        Ok(None) => {
+                            return Err(DeError::custom(format!(
+                                "null element at index {} of a decimal array; \
+                                 array attributes need one value per segment",
+                                out.len()
+                            )))
+                        }
                         Err(e) => return Err(DeError::custom(e.to_string())),
                     }
                 }

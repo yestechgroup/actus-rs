@@ -334,3 +334,27 @@ fn every_serializing_helper_round_trips() {
     );
     assert_eq!(wire(encoded).unwrap(), original);
 }
+
+/// #26: array attributes are positional (element `i` belongs to segment
+/// `i`), so a `null` element must be rejected, not dropped: dropping it
+/// would shift every later value onto the wrong segment.
+#[test]
+fn decimal_vec_option_rejects_null_elements_instead_of_shifting_segments() {
+    let err = wire(json!({"decimals": ["0.01", null, "0.02"]}))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("index 1"), "{err}");
+    assert!(err.contains("null"), "{err}");
+    assert!(wire(json!({"decimals": [null]})).is_err());
+}
+
+#[test]
+fn null_array_elements_are_rejected_on_real_contract_terms() {
+    for attribute in ["arrayRate", "arrayNextPrincipalRedemptionPayment"] {
+        let terms = json!({ "contractType": "LAX", attribute: ["0.05", null, "0.09"] });
+        let err = serde_json::from_value::<actus_model::ContractTerms>(terms)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("index 1"), "{attribute}: {err}");
+    }
+}

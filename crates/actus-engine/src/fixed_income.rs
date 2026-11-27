@@ -19,6 +19,7 @@ use actus_model::{
 
 use crate::common::{anchored_series, calculation_time, stub_series, stub_series_unshifted};
 use crate::daycount::{day_count_fraction, normalize_timestamp};
+use crate::event::ContractEvent;
 use crate::state::ContractState;
 use crate::EngineError;
 
@@ -144,8 +145,8 @@ pub(crate) fn rate_reset_schedule(
         .collect()
 }
 
-/// A fixing series `S(anchor, cycle, MD)` without the maturity element
-/// (shared shape of the `SC` and `IPCB` schedule rows).
+/// A series `S(anchor, cycle, MD)` without the maturity element (shared
+/// shape of the `PR`, `SC` and `IPCB` schedule rows).
 fn fixing_schedule(
     c: &Conventions,
     anchor: Option<NaiveDateTime>,
@@ -159,6 +160,16 @@ fn fixing_schedule(
         .filter(|(calc, _)| *calc != c.maturity)
         .map(|(calc, emit)| Timing { calc, emit })
         .collect()
+}
+
+/// The `PR` redemption series `S(PRANX, PRCL, MD)` without the maturity
+/// element (the final redemption belongs to `MD`).
+pub(crate) fn principal_redemption_schedule(c: &Conventions, terms: &ContractTerms) -> Vec<Timing> {
+    fixing_schedule(
+        c,
+        terms.cycle_anchor_date_of_principal_redemption,
+        terms.cycle_of_principal_redemption.as_ref(),
+    )
 }
 
 /// The `IPCB` fixing series: defined only for `IPCB = NTL`, from `IPCBANX`
@@ -237,6 +248,62 @@ pub(crate) fn observed(
         }
     }
     true
+}
+
+/// One schedule element of a fixed-income engine, as the shared event loop
+/// needs to see it. Each engine keeps its own slot type and implements this.
+pub(crate) trait ScheduledEvent: Copy {
+    /// The dictionary event type the element reports as.
+    fn event_type(&self) -> EventType;
+    /// The same-timestamp sequence number (see [`observed`]).
+    fn sequence(&self) -> u8;
+    /// The emission (reported) time.
+    fn emit(&self) -> NaiveDateTime;
+}
+
+/// The event loop shared by PAM, LAM, NAM, ANN and LAX.
+///
+/// The starting state is `progressed()` for a contract already running at
+/// the status date (`IED` before `t0`), otherwise `pre_ied()`. Every slot is
+/// then applied in schedule order through `apply` (the engine's state
+/// transition and payoff functions), and the events that are observable are
+/// reported: emitted at or after `IED`, after the status date, and inside
+/// the purchase/termination window. For a progressed contract the `IED`
+/// slot is skipped entirely, since its state already holds the `t0` values.
+pub(crate) fn evaluate_schedule<S: ScheduledEvent>(
+    ied: NaiveDateTime,
+    t0: NaiveDateTime,
+    slots: Vec<S>,
+    terms: &ContractTerms,
+    progressed: impl FnOnce() -> Result<ContractState, EngineError>,
+    pre_ied: impl FnOnce() -> ContractState,
+    mut apply: impl FnMut(&mut ContractState, S) -> Result<Decimal, EngineError>,
+) -> Result<Vec<ContractEvent>, EngineError> {
+    let is_progressed = ied < t0;
+    let mut state = if is_progressed {
+        progressed()?
+    } else {
+        pre_ied()
+    };
+    let mut events = Vec::new();
+    for slot in slots {
+        if is_progressed && slot.event_type() == EventType::InitialExchange {
+            continue;
+        }
+        let payoff = apply(&mut state, slot)?;
+        let emit = slot.emit();
+        if emit < ied || !observed(t0, emit, slot.sequence(), terms) {
+            continue;
+        }
+        events.push(ContractEvent {
+            event_type: slot.event_type(),
+            time: normalize_timestamp(emit),
+            payoff,
+            currency: terms.currency.clone(),
+            state: state.clone(),
+        });
+    }
+    Ok(events)
 }
 
 /// The accrued interest state at `IED`: the carried `accruedInterest` term

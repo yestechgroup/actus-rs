@@ -225,7 +225,10 @@ fn parent_event(
 /// notional state sum the leg values; the interest-bearing states collapse
 /// to the parent's own values (unset for the parent swap, hence zero, as the
 /// swaps11 fixture reports). Non-congruent events pass through untouched.
-fn merge_congruent(terms: &ContractTerms, stream: Vec<ContractEvent>) -> Vec<ContractEvent> {
+pub(crate) fn merge_congruent(
+    terms: &ContractTerms,
+    stream: Vec<ContractEvent>,
+) -> Vec<ContractEvent> {
     let parent_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
     let parent_accrued = terms.accrued_interest.unwrap_or(Decimal::ZERO);
     let mut merged: Vec<ContractEvent> = Vec::with_capacity(stream.len());

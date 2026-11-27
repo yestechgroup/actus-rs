@@ -74,14 +74,14 @@ use actus_model::{
 
 use crate::common::{
     apply_principal_redemption, base_is_nt, base_tracks_notional, initial_base_amount, role_sign,
-    stub_series, term_scaling_multipliers,
+    term_scaling_multipliers,
 };
 use crate::daycount::{day_count_fraction, normalize_timestamp};
 use crate::engine::ContractEngine;
 use crate::event::{sequence_rank, ContractEvent};
 use crate::fixed_income::{
-    self, interest_calculation_base_schedule, interest_schedule, rate_reset_schedule, Conventions,
-    RateReset, Timing,
+    self, interest_calculation_base_schedule, interest_schedule, principal_redemption_schedule,
+    rate_reset_schedule, Conventions, RateReset, ScheduledEvent, Timing,
 };
 use crate::risk::RiskFactorProvider;
 use crate::schedule::{cycle_step, generate_schedule, shift_business_day};
@@ -99,6 +99,20 @@ struct Slot {
     kind: Kind,
     calc: NaiveDateTime,
     emit: NaiveDateTime,
+}
+
+impl ScheduledEvent for Slot {
+    fn event_type(&self) -> EventType {
+        self.kind.event_type()
+    }
+
+    fn sequence(&self) -> u8 {
+        self.kind.rank()
+    }
+
+    fn emit(&self) -> NaiveDateTime {
+        self.emit
+    }
 }
 
 impl Slot {
@@ -172,32 +186,15 @@ impl ContractEngine for AnnEngine {
         risk: &dyn RiskFactorProvider,
     ) -> Result<Vec<ContractEvent>, EngineError> {
         let ctx = Context::new(terms)?;
-        let slots = ctx.schedule(terms);
-        let progressed = ctx.ied < ctx.t0;
-        let mut state = if progressed {
-            progressed_initial(&ctx, terms)?
-        } else {
-            initial_state(&ctx, terms)
-        };
-        let mut events = Vec::new();
-        for slot in slots {
-            if slot.kind == Kind::InitialExchange && progressed {
-                continue;
-            }
-            let payoff = ctx.apply(&mut state, slot, terms, risk)?;
-            let reported = slot.emit >= ctx.ied;
-            if !reported || !ctx.observed(slot.emit, slot.kind.rank(), terms) {
-                continue;
-            }
-            events.push(ContractEvent {
-                event_type: slot.kind.event_type(),
-                time: normalize_timestamp(slot.emit),
-                payoff,
-                currency: terms.currency.clone(),
-                state: state.clone(),
-            });
-        }
-        Ok(events)
+        fixed_income::evaluate_schedule(
+            ctx.ied,
+            ctx.t0,
+            ctx.schedule(terms),
+            terms,
+            || progressed_initial(&ctx, terms),
+            || initial_state(&ctx, terms),
+            |state, slot| ctx.apply(state, slot, terms, risk),
+        )
     }
 }
 
@@ -301,15 +298,6 @@ impl Context {
         })
     }
 
-    /// Whether an event at `t` is observed: the analysis window starts at the
-    /// status date (progressed contracts) and at the purchase date when
-    /// `PRD` is set, and ends at termination when `TD` is set. At the
-    /// purchase date itself the events preceding `PRD` in the dictionary
-    /// sequence mutate the state but are not reported.
-    fn observed(&self, t: NaiveDateTime, rank: u8, terms: &ContractTerms) -> bool {
-        fixed_income::observed(self.t0, t, rank, terms)
-    }
-
     /// Builds the ANN event skeleton in deterministic (calculation time,
     /// dictionary sequence) order.
     fn schedule(&self, terms: &ContractTerms) -> Vec<Slot> {
@@ -361,24 +349,10 @@ impl Context {
         terms: &ContractTerms,
         slots: &mut Vec<Slot>,
     ) -> Option<NaiveDateTime> {
-        let anchor = terms
-            .cycle_anchor_date_of_principal_redemption
-            .map(normalize_timestamp)?;
-        let cycle = terms.cycle_of_principal_redemption.as_ref()?;
-        let mut first = None;
-        for (calc, emit) in stub_series(anchor, cycle, self.maturity, self.eomc, self.bdc, self.cal)
-        {
-            if calc == self.maturity {
-                continue;
-            }
-            if first.is_none() {
-                first = Some(emit);
-            }
-            slots.push(Slot {
-                kind: Kind::PrincipalRedemption,
-                calc,
-                emit,
-            });
+        let schedule = principal_redemption_schedule(&self.conventions(), terms);
+        let first = schedule.first().map(|timing| timing.emit);
+        for timing in schedule {
+            slots.push(Slot::timed(Kind::PrincipalRedemption, timing));
         }
         first
     }
