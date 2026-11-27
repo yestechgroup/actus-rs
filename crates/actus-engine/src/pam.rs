@@ -43,7 +43,7 @@ use crate::daycount::{day_count_fraction, normalize_timestamp};
 use crate::engine::ContractEngine;
 use crate::event::ContractEvent;
 use crate::fixed_income::{
-    self, interest_schedule, rate_reset_schedule, Conventions, RateReset, Timing,
+    self, interest_schedule, rate_reset_schedule, Conventions, RateReset, ScheduledEvent, Timing,
 };
 use crate::risk::RiskFactorProvider;
 use crate::state::{ContractState, ContractStatus};
@@ -61,6 +61,20 @@ struct Slot {
     kind: Kind,
     calc: NaiveDateTime,
     emit: NaiveDateTime,
+}
+
+impl ScheduledEvent for Slot {
+    fn event_type(&self) -> EventType {
+        self.kind.event_type()
+    }
+
+    fn sequence(&self) -> u8 {
+        self.kind.priority()
+    }
+
+    fn emit(&self) -> NaiveDateTime {
+        self.emit
+    }
 }
 
 impl Slot {
@@ -127,32 +141,15 @@ impl ContractEngine for PamEngine {
         risk: &dyn RiskFactorProvider,
     ) -> Result<Vec<ContractEvent>, EngineError> {
         let ctx = Context::new(terms)?;
-        let slots = ctx.schedule(terms);
-        let progressed = ctx.ied < ctx.t0;
-        let mut state = if progressed {
-            progressed_initial(&ctx, terms)?
-        } else {
-            ContractState::initial(terms)
-        };
-        let mut events = Vec::new();
-        for slot in slots {
-            if slot.kind == Kind::InitialExchange && progressed {
-                continue;
-            }
-            let payoff = ctx.apply(&mut state, slot, terms, risk)?;
-            let reported = slot.emit >= ctx.ied;
-            if !reported || !ctx.observed(slot.emit, slot.kind.priority(), terms) {
-                continue;
-            }
-            events.push(ContractEvent {
-                event_type: slot.kind.event_type(),
-                time: normalize_timestamp(slot.emit),
-                payoff,
-                currency: terms.currency.clone(),
-                state: state.clone(),
-            });
-        }
-        Ok(events)
+        fixed_income::evaluate_schedule(
+            ctx.ied,
+            ctx.t0,
+            ctx.schedule(terms),
+            terms,
+            || progressed_initial(&ctx, terms),
+            || ContractState::initial(terms),
+            |state, slot| ctx.apply(state, slot, terms, risk),
+        )
     }
 }
 
@@ -207,13 +204,6 @@ impl Context {
             cal: terms.calendar.unwrap_or(Calendar::Nc),
             sgn: role_sign(terms),
         })
-    }
-
-    /// Whether an event at `t` is observed: the analysis window starts at the
-    /// status date (progressed contracts) and at the purchase date when `PRD`
-    /// is set, and ends at termination when `TD` is set.
-    fn observed(&self, t: NaiveDateTime, priority: u8, terms: &ContractTerms) -> bool {
-        fixed_income::observed(self.t0, t, priority, terms)
     }
 
     /// Builds the PAM event skeleton in deterministic (calculation time,

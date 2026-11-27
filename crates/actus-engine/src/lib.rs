@@ -31,6 +31,7 @@ pub mod ceg;
 pub mod clm;
 pub mod com;
 pub mod common;
+pub(crate) mod credit_enhancement;
 pub mod csh;
 pub mod daycount;
 pub mod engine;

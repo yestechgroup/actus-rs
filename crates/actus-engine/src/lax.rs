@@ -55,7 +55,8 @@ use crate::engine::ContractEngine;
 use crate::event::ContractEvent;
 use crate::fixed_income::{
     self, interest_calculation_base_schedule, interest_schedule, rate_reset_schedule,
-    scales_interest, scales_notional, scaling_index_schedule, Conventions, RateReset, Timing,
+    scales_interest, scales_notional, scaling_index_schedule, Conventions, RateReset,
+    ScheduledEvent, Timing,
 };
 use crate::risk::RiskFactorProvider;
 use crate::schedule::{array_series, cycle_step};
@@ -75,6 +76,20 @@ struct Slot {
     calc: NaiveDateTime,
     emit: NaiveDateTime,
     segment: usize,
+}
+
+impl ScheduledEvent for Slot {
+    fn event_type(&self) -> EventType {
+        self.kind.event_type()
+    }
+
+    fn sequence(&self) -> u8 {
+        self.kind.priority()
+    }
+
+    fn emit(&self) -> NaiveDateTime {
+        self.emit
+    }
 }
 
 impl Slot {
@@ -162,32 +177,15 @@ impl ContractEngine for LaxEngine {
         risk: &dyn RiskFactorProvider,
     ) -> Result<Vec<ContractEvent>, EngineError> {
         let ctx = Context::new(terms)?;
-        let slots = ctx.schedule(terms);
-        let progressed = ctx.ied < ctx.t0;
-        let mut state = if progressed {
-            progressed_initial(&ctx, terms)?
-        } else {
-            initial_state(&ctx, terms)
-        };
-        let mut events = Vec::new();
-        for slot in slots {
-            if slot.kind == Kind::InitialExchange && progressed {
-                continue;
-            }
-            let payoff = ctx.apply(&mut state, slot, terms, risk)?;
-            let reported = slot.emit >= ctx.ied;
-            if !reported || !ctx.observed(slot.emit, slot.kind.priority(), terms) {
-                continue;
-            }
-            events.push(ContractEvent {
-                event_type: slot.kind.event_type(),
-                time: normalize_timestamp(slot.emit),
-                payoff,
-                currency: terms.currency.clone(),
-                state: state.clone(),
-            });
-        }
-        Ok(events)
+        fixed_income::evaluate_schedule(
+            ctx.ied,
+            ctx.t0,
+            ctx.schedule(terms),
+            terms,
+            || progressed_initial(&ctx, terms),
+            || initial_state(&ctx, terms),
+            |state, slot| ctx.apply(state, slot, terms, risk),
+        )
     }
 }
 
@@ -382,15 +380,6 @@ impl Context {
             payments: terms.array_next_principal_redemption_payment.clone(),
             increase_decrease: terms.array_increase_decrease.clone(),
         })
-    }
-
-    /// Whether an event at `t` is observed: the analysis window starts at the
-    /// status date (progressed contracts) and at the purchase date when
-    /// `PRD` is set, and ends at termination when `TD` is set. At the
-    /// purchase date itself the events preceding `PRD` in the dictionary
-    /// sequence mutate the state but are not reported.
-    fn observed(&self, t: NaiveDateTime, priority: u8, terms: &ContractTerms) -> bool {
-        fixed_income::observed(self.t0, t, priority, terms)
     }
 
     /// Builds the LAX event skeleton in deterministic (calculation time,

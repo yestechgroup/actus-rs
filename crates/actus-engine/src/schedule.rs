@@ -6,6 +6,8 @@ use chrono::{Datelike, Duration, Months, NaiveDate, NaiveDateTime, Weekday};
 
 use actus_model::{BusinessDayConvention, Calendar, Cycle, CyclePeriod, EndOfMonthConvention};
 
+use crate::daycount::days_in_month;
+
 const MAX_SCHEDULE_ROLLS: u64 = 100_000;
 const MAX_SHIFT_HOPS: u32 = 366;
 
@@ -125,20 +127,6 @@ fn previous_day(t: NaiveDateTime) -> NaiveDateTime {
         .pred_opt()
         .expect("date predecessor is representable")
         .and_time(t.time())
-}
-
-fn days_in_month(year: i32, month: u32) -> u32 {
-    let (next_year, next_month) = if month == 12 {
-        (year + 1, 1)
-    } else {
-        (year, month + 1)
-    };
-    let first_of_next_month =
-        NaiveDate::from_ymd_opt(next_year, next_month, 1).expect("valid first of month");
-    first_of_next_month
-        .pred_opt()
-        .map(|last| last.day())
-        .unwrap_or(30)
 }
 
 fn is_last_day_of_month(t: NaiveDateTime) -> bool {
