@@ -204,3 +204,84 @@ fn attribute_meta_carries_labels_and_descriptions() {
         .iter()
         .all(|a| a["acronym"].is_string() && a["dataType"].is_string()));
 }
+
+/// Every `#[wasm_bindgen]` export, called natively on its success path.
+/// (Error paths build a `JsValue`, which only works on wasm targets; their
+/// logic lives in `dto` and is covered by the tests below.)
+#[test]
+fn every_binding_export_succeeds_on_valid_input() {
+    let types: Value = serde_json::from_str(&actus_wasm::contract_types()).unwrap();
+    assert!(types.as_array().is_some_and(|t| !t.is_empty()));
+
+    let matrix: Value = serde_json::from_str(&actus_wasm::applicability_matrix()).unwrap();
+    assert!(matrix.as_array().is_some_and(|m| !m.is_empty()));
+
+    let meta: Value = serde_json::from_str(&actus_wasm::attribute_meta()).unwrap();
+    assert!(meta.as_array().is_some_and(|m| !m.is_empty()));
+
+    let pam: Value =
+        serde_json::from_str(&actus_wasm::applicability("pam".to_string()).unwrap()).unwrap();
+    assert!(pam.is_object());
+
+    let report: Value =
+        serde_json::from_str(&actus_wasm::validate(PAM01_TERMS.to_string()).unwrap()).unwrap();
+    assert!(report.is_object());
+
+    let plain: Value =
+        serde_json::from_str(&actus_wasm::evaluate(PAM01_TERMS.to_string()).unwrap()).unwrap();
+    let with_empty_risk: Value = serde_json::from_str(
+        &actus_wasm::evaluate_with_risk(PAM01_TERMS.to_string(), "{}".to_string()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        plain, with_empty_risk,
+        "an empty scenario must not change the schedule"
+    );
+
+    let specs: Value =
+        serde_json::from_str(&actus_wasm::contract_param_specs("PAM".to_string()).unwrap())
+            .unwrap();
+    assert!(specs.as_array().is_some_and(|s| !s.is_empty()));
+
+    let built: Value = serde_json::from_str(
+        &actus_wasm::build_terms_json(
+            "PAM".to_string(),
+            r#"{"notionalPrincipal": "1000"}"#.to_string(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(built["contractType"], "PAM");
+    assert_eq!(built["notionalPrincipal"], "1000");
+}
+
+#[test]
+fn param_specs_json_parses_the_type_case_insensitively_and_rejects_unknown() {
+    assert_eq!(
+        actus_wasm::dto::param_specs_json("pam").unwrap(),
+        actus_wasm::dto::param_specs_json("PAM").unwrap()
+    );
+    let err = actus_wasm::dto::param_specs_json("XXX").unwrap_err();
+    assert!(err.contains("XXX"), "{err}");
+}
+
+#[test]
+fn every_contract_type_has_param_specs() {
+    for contract_type in ContractType::ALL {
+        let json = actus_wasm::dto::param_specs_json(contract_type.as_acronym())
+            .unwrap_or_else(|e| panic!("{contract_type}: {e}"));
+        let specs: Value = serde_json::from_str(&json).unwrap();
+        assert!(specs.is_array(), "{contract_type}");
+    }
+}
+
+#[test]
+fn build_terms_json_rejects_unknown_types_and_malformed_values() {
+    assert!(actus_wasm::dto::build_terms_json("XXX", "{}").is_err());
+    let err = actus_wasm::dto::build_terms_json("PAM", "not json").unwrap_err();
+    assert!(err.starts_with("invalid values JSON"), "{err}");
+    // Values must be strings: numbers are rejected rather than coerced.
+    let err =
+        actus_wasm::dto::build_terms_json("PAM", r#"{"notionalPrincipal": 1000}"#).unwrap_err();
+    assert!(err.starts_with("invalid values JSON"), "{err}");
+}
