@@ -309,7 +309,7 @@ impl Context {
                 state.notional_principal = self.sgn * notional;
                 state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
                 state.accrued_interest =
-                    fixed_income::initial_accrued(terms, state, slot.calc, self.dcc, Decimal::ONE)?;
+                    fixed_income::initial_accrued(terms, state, slot.calc, self.dcc, self.sgn)?;
                 self.sgn * -(notional + premium)
             }
             Kind::InterestPayment => {
@@ -395,7 +395,7 @@ fn progressed_initial(ctx: &Context, terms: &ContractTerms) -> Result<ContractSt
     state.accrued_interest = match terms.nominal_interest_rate {
         None => Decimal::ZERO,
         Some(_) => match terms.accrued_interest {
-            Some(accrued) => accrued,
+            Some(accrued) => ctx.sgn * accrued,
             None => {
                 let accrual = fixed_income::progressed_accrued(
                     &ctx.conventions(),
@@ -414,8 +414,17 @@ mod tests {
     use super::*;
     use crate::risk::StateProvider;
     use chrono::NaiveDateTime;
+    use rust_decimal_macros::dec;
     use serde_json::json;
     use std::str::FromStr;
+
+    fn assert_close(actual: Decimal, expected: Decimal) {
+        let tolerance = dec!(0.0000000001);
+        assert!(
+            (actual - expected).abs() < tolerance,
+            "actual {actual} vs expected {expected}"
+        );
+    }
 
     fn terms(raw: serde_json::Value) -> ContractTerms {
         serde_json::from_value(raw).expect("terms")
@@ -656,6 +665,44 @@ mod tests {
                 t("2013-06-01T00:00:00"),
                 t("2013-07-01T00:00:00")
             ]
+        );
+    }
+
+    /// #27: the carried `accruedInterest` attribute is unsigned; the state is
+    /// role-signed (as the official nam04 fixture pins for NAM).
+    #[test]
+    fn carried_accrued_interest_takes_the_role_sign() {
+        let terms = terms(json!({
+            "contractType": "PAM",
+            "contractRole": "RPL",
+            "statusDate": "2012-12-30T00:00:00",
+            "initialExchangeDate": "2013-01-01T00:00:00",
+            "maturityDate": "2014-01-01T00:00:00",
+            "notionalPrincipal": "1000",
+            "nominalInterestRate": "0.05",
+            "accruedInterest": "10",
+            "cycleAnchorDateOfInterestPayment": "2013-04-01T00:00:00",
+            "cycleOfInterestPayment": "P3ML0",
+            "dayCountConvention": "A365"
+        }));
+        let events = PamEngine
+            .evaluate(&terms, &StateProvider::new())
+            .expect("events");
+        let ied = events
+            .iter()
+            .find(|e| e.event_type == EventType::InitialExchange)
+            .expect("IED");
+        // RPL: the unsigned attribute 10 becomes the liability-side state -10.
+        assert_eq!(ied.state.accrued_interest, dec!(-10));
+        let ip = events
+            .iter()
+            .find(|e| e.event_type == EventType::InterestPayment)
+            .expect("first IP");
+        assert_eq!(ip.time, t("2013-04-01T00:00:00"));
+        // Carried -10 plus 90 days of 5% on the signed notional -1000.
+        assert_close(
+            ip.payoff,
+            dec!(-10) + dec!(90) / dec!(365) * dec!(0.05) * dec!(-1000),
         );
     }
 }

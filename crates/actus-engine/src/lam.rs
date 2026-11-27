@@ -438,7 +438,7 @@ impl Context {
                 state.notional_principal = self.sgn * notional;
                 state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
                 state.accrued_interest =
-                    fixed_income::initial_accrued(terms, state, slot.calc, self.dcc, Decimal::ONE)?;
+                    fixed_income::initial_accrued(terms, state, slot.calc, self.dcc, self.sgn)?;
                 state.next_principal_redemption_payment = self.next_principal_redemption;
                 let (interest_scaling, notional_scaling) = term_scaling_multipliers(terms);
                 state.interest_scaling_multiplier = interest_scaling;
@@ -597,7 +597,7 @@ fn progressed_initial(ctx: &Context, terms: &ContractTerms) -> Result<ContractSt
     state.accrued_interest = match terms.nominal_interest_rate {
         None => Decimal::ZERO,
         Some(_) => match terms.accrued_interest {
-            Some(accrued) => accrued,
+            Some(accrued) => ctx.sgn * accrued,
             None => fixed_income::progressed_accrued(
                 &ctx.conventions(),
                 terms,
@@ -969,5 +969,47 @@ mod tests {
         assert_eq!(pr.state.notional_principal, Decimal::from(-4500));
         let maturity = events.last().expect("MD");
         assert_eq!(maturity.payoff, Decimal::from(-500));
+    }
+
+    /// #27: the carried `accruedInterest` attribute is unsigned; the state is
+    /// role-signed (as the official nam04 fixture pins for NAM).
+    #[test]
+    fn carried_accrued_interest_takes_the_role_sign() {
+        let terms = terms(json!({
+            "contractType": "LAM",
+            "contractRole": "RPL",
+            "statusDate": "2012-12-30T00:00:00",
+            "initialExchangeDate": "2013-01-01T00:00:00",
+            "maturityDate": "2014-01-01T00:00:00",
+            "notionalPrincipal": "1000",
+            "nominalInterestRate": "0.05",
+            "accruedInterest": "10",
+            "cycleAnchorDateOfPrincipalRedemption": "2013-04-01T00:00:00",
+            "cycleOfPrincipalRedemption": "P3ML0",
+            "nextPrincipalRedemptionPayment": "250",
+            "cycleAnchorDateOfInterestPayment": "2013-04-01T00:00:00",
+            "cycleOfInterestPayment": "P3ML0",
+            "dayCountConvention": "A365",
+            "interestCalculationBase": "NT"
+        }));
+        let events = LamEngine
+            .evaluate(&terms, &StateProvider::new())
+            .expect("events");
+        let ied = events
+            .iter()
+            .find(|e| e.event_type == EventType::InitialExchange)
+            .expect("IED");
+        // RPL: the unsigned attribute 10 becomes the liability-side state -10.
+        assert_eq!(ied.state.accrued_interest, dec!(-10));
+        let ip = events
+            .iter()
+            .find(|e| e.event_type == EventType::InterestPayment)
+            .expect("first IP");
+        assert_eq!(ip.time, t("2013-04-01T00:00:00"));
+        // Carried -10 plus 90 days of 5% on the signed notional -1000.
+        assert_close(
+            ip.payoff,
+            dec!(-10) + dec!(90) / dec!(365) * dec!(0.05) * dec!(-1000),
+        );
     }
 }

@@ -241,20 +241,19 @@ pub(crate) fn observed(
 }
 
 /// The accrued interest state at `IED`: the carried `accruedInterest` term
-/// multiplied by `carried_sign`, otherwise the accrual since `IPANX` when
-/// the anchor precedes the initial exchange, otherwise zero.
-///
-/// `carried_sign` is the role sign for NAM and ANN and `1` for PAM, LAM and
-/// LAX; the engines read the techspec differently here.
+/// with the role sign `sgn` applied (it is an unsigned attribute; the state
+/// is role-signed, as the official nam04 fixture pins), otherwise the
+/// accrual since `IPANX` when the anchor precedes the initial exchange,
+/// otherwise zero. The accrual is already signed through the notional.
 pub(crate) fn initial_accrued(
     terms: &ContractTerms,
     state: &ContractState,
     ied: NaiveDateTime,
     dcc: DayCountConvention,
-    carried_sign: Decimal,
+    sgn: Decimal,
 ) -> Result<Decimal, EngineError> {
     if let Some(accrued) = terms.accrued_interest {
-        return Ok(carried_sign * accrued);
+        return Ok(sgn * accrued);
     }
     if let Some(anchor) = terms.cycle_anchor_date_of_interest_payment {
         if anchor < ied {
@@ -513,7 +512,7 @@ mod tests {
     }
 
     #[test]
-    fn initial_accrued_applies_the_sign_only_to_the_carried_term() {
+    fn initial_accrued_role_signs_only_the_carried_term() {
         let mut state = ContractState::initial(&quarterly_loan(json!({})));
         state.notional_principal = dec!(1000);
         state.nominal_interest_rate = dec!(0.05);
