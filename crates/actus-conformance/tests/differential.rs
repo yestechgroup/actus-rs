@@ -37,22 +37,29 @@ const RELATIVE_TOLERANCE: &str = "0.00000001";
 
 #[test]
 fn pam_corpus_agrees_with_the_independent_oracle() {
-    compare_slice(ContractType::Pam, oracle::evaluate_pam);
+    compare_slice(ContractType::Pam, oracle::evaluate_pam, ContractType::Pam);
 }
 
 #[test]
 fn lam_corpus_agrees_with_the_independent_oracle() {
-    compare_slice(ContractType::Lam, oracle::evaluate_lam);
+    compare_slice(ContractType::Lam, oracle::evaluate_lam, ContractType::Lam);
 }
 
 #[test]
 fn nam_corpus_agrees_with_the_independent_oracle() {
-    compare_slice(ContractType::Nam, oracle::evaluate_nam);
+    compare_slice(ContractType::Nam, oracle::evaluate_nam, ContractType::Nam);
+}
+
+/// LAX without array attributes is a LAM: the LAM slice, evaluated by the
+/// LAX engine, must agree with the LAM oracle.
+#[test]
+fn lam_corpus_evaluated_as_lax_agrees_with_the_lam_oracle() {
+    compare_slice(ContractType::Lam, oracle::evaluate_lam, ContractType::Lax);
 }
 
 #[test]
 fn ann_corpus_agrees_with_the_independent_oracle() {
-    compare_slice(ContractType::Ann, oracle::evaluate_ann);
+    compare_slice(ContractType::Ann, oracle::evaluate_ann, ContractType::Ann);
 }
 
 /// The oracle entry-point shape shared by the per-contract-type evaluators.
@@ -63,8 +70,13 @@ type OracleEvaluate = fn(
 
 /// Compares one contract-type slice of the pinned corpus: engine events
 /// against oracle events, strictly, for every case. The four slices jointly
-/// gate all 2048 corpus cases.
-fn compare_slice(contract_type: ContractType, oracle_evaluate: OracleEvaluate) {
+/// gate all 2048 corpus cases. The engine evaluates each case re-typed as
+/// `engine_type` (the slice's own type except for the LAX gate).
+fn compare_slice(
+    contract_type: ContractType,
+    oracle_evaluate: OracleEvaluate,
+    engine_type: ContractType,
+) {
     let cases = corpus::generate(corpus::CORPUS_SEED, corpus::DIFFERENTIAL_CASES);
     let slice: Vec<&corpus::CorpusCase> = cases
         .iter()
@@ -85,8 +97,10 @@ fn compare_slice(contract_type: ContractType, oracle_evaluate: OracleEvaluate) {
                 provider = provider.with_rate(code, *time, *value);
             }
         }
+        let mut engine_terms = case.terms.clone();
+        engine_terms.contract_type = engine_type;
         let engine_events = registry
-            .evaluate(&case.terms, &provider)
+            .evaluate(&engine_terms, &provider)
             .unwrap_or_else(|e| panic!("{}: engine evaluation failed: {e}", case.id));
         let oracle_events = oracle_evaluate(&case.terms, &case.risk_factors)
             .unwrap_or_else(|e| panic!("{}: oracle evaluation failed: {e}", case.id));

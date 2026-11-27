@@ -1194,4 +1194,162 @@ mod tests {
         assert_eq!(resets[3].state.nominal_interest_rate, dec!(0.09));
         assert!(resets.iter().all(|e| e.payoff == Decimal::ZERO));
     }
+
+    /// A one-year LAX with quarterly array redemptions and a two-segment
+    /// rate array; `extra` overrides or adds attributes.
+    fn array_rate_contract(extra: serde_json::Value) -> ContractTerms {
+        let mut raw = json!({
+            "contractType": "LAX",
+            "contractRole": "RPA",
+            "statusDate": "2025-12-30T00:00:00",
+            "initialExchangeDate": "2026-01-01T00:00:00",
+            "maturityDate": "2027-01-01T00:00:00",
+            "notionalPrincipal": "1200",
+            "nominalInterestRate": "0.08",
+            "arrayCycleAnchorDateOfPrincipalRedemption": ["2026-01-01T00:00:00"],
+            "arrayCycleOfPrincipalRedemption": ["P3ML1"],
+            "arrayNextPrincipalRedemptionPayment": ["100"],
+            "arrayCycleAnchorDateOfRateReset":
+                ["2026-01-01T00:00:00", "2026-07-01T00:00:00"],
+            "arrayCycleOfRateReset": ["P2ML0", "P6ML0"],
+            "arrayRate": ["0.05", "0.09"],
+            "cycleAnchorDateOfInterestPayment": "2026-01-01T00:00:00",
+            "cycleOfInterestPayment": "P3ML1",
+            "dayCountConvention": "A365",
+            "interestCalculationBase": "NT"
+        });
+        for (key, value) in extra.as_object().expect("object") {
+            raw[key] = value.clone();
+        }
+        terms(raw)
+    }
+
+    #[test]
+    fn variable_array_rate_adds_the_segment_spread_to_the_observed_rate() {
+        let terms = array_rate_contract(json!({
+            "arrayFixedVariable": "V",
+            "marketObjectCodeOfRateReset": "IDX",
+            "rateMultiplier": "2"
+        }));
+        let risk = StateProvider::new()
+            .with_rate("IDX", t("2026-01-01T00:00:00"), dec!(0.01))
+            .with_rate("IDX", t("2026-07-01T00:00:00"), dec!(0.02));
+        let events = LaxEngine.evaluate(&terms, &risk).expect("events");
+        let rates: Vec<(NaiveDateTime, Decimal)> = events
+            .iter()
+            .filter(|e| e.event_type == EventType::RateResetVariable)
+            .map(|e| (e.time, e.state.nominal_interest_rate))
+            .collect();
+        assert_eq!(
+            rates,
+            vec![
+                // Segment 0: 2 x 0.01 + 0.05.
+                (t("2026-01-01T00:00:00"), dec!(0.07)),
+                (t("2026-03-01T00:00:00"), dec!(0.07)),
+                (t("2026-05-01T00:00:00"), dec!(0.07)),
+                // Segment 1: 2 x 0.02 + 0.09.
+                (t("2026-07-01T00:00:00"), dec!(0.13)),
+            ]
+        );
+    }
+
+    #[test]
+    fn variable_array_rate_needs_a_market_object_and_an_observation() {
+        let missing_code = array_rate_contract(json!({ "arrayFixedVariable": "V" }));
+        assert!(matches!(
+            LaxEngine.evaluate(&missing_code, &StateProvider::new()),
+            Err(EngineError::MissingAttribute("marketObjectCodeOfRateReset"))
+        ));
+        let unobserved = array_rate_contract(json!({
+            "arrayFixedVariable": "V",
+            "marketObjectCodeOfRateReset": "IDX"
+        }));
+        match LaxEngine.evaluate(&unobserved, &StateProvider::new()) {
+            Err(EngineError::RiskFactorMissing { code, .. }) => assert_eq!(code, "IDX"),
+            other => panic!("expected RiskFactorMissing, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn interest_array_schedules_interest_on_the_array_dates() {
+        let mut terms = array_rate_contract(json!({
+            "arrayCycleAnchorDateOfInterestPayment":
+                ["2026-01-01T00:00:00", "2026-07-01T00:00:00"],
+            "arrayCycleOfInterestPayment": ["P6ML1", "P1ML1"]
+        }));
+        terms.array_cycle_anchor_date_of_rate_reset = None;
+        terms.array_cycle_of_rate_reset = None;
+        terms.array_rate = None;
+        let events = LaxEngine
+            .evaluate(&terms, &StateProvider::new())
+            .expect("events");
+        let ip: Vec<NaiveDateTime> = events
+            .iter()
+            .filter(|e| e.event_type == EventType::InterestPayment)
+            .map(|e| e.time)
+            .collect();
+        // Segment 0 is semiannual (one IP at 2026-01-01, the anchor, then
+        // segment 1 takes over monthly from 2026-07-01 to maturity).
+        assert_eq!(ip.first(), Some(&t("2026-01-01T00:00:00")));
+        assert!(ip.contains(&t("2026-07-01T00:00:00")));
+        assert!(ip.contains(&t("2026-08-01T00:00:00")));
+        assert!(ip.contains(&t("2026-12-01T00:00:00")));
+        assert!(!ip.contains(&t("2026-04-01T00:00:00")));
+        assert!(ip.iter().all(|time| *time <= t("2027-01-01T00:00:00")));
+        // Interest is paid on every IP event; total accrual is positive.
+        let paid: Decimal = events
+            .iter()
+            .filter(|e| e.event_type == EventType::InterestPayment)
+            .map(|e| e.payoff)
+            .sum();
+        assert!(paid > Decimal::ZERO);
+    }
+
+    #[test]
+    fn without_an_interest_cycle_interest_follows_the_redemption_dates() {
+        let mut terms = array_rate_contract(json!({}));
+        terms.cycle_anchor_date_of_interest_payment = None;
+        terms.cycle_of_interest_payment = None;
+        terms.array_cycle_anchor_date_of_rate_reset = None;
+        terms.array_cycle_of_rate_reset = None;
+        terms.array_rate = None;
+        let events = LaxEngine
+            .evaluate(&terms, &StateProvider::new())
+            .expect("events");
+        let pr: Vec<NaiveDateTime> = events
+            .iter()
+            .filter(|e| e.event_type == EventType::PrincipalRedemption)
+            .map(|e| e.time)
+            .collect();
+        let ip: Vec<NaiveDateTime> = events
+            .iter()
+            .filter(|e| e.event_type == EventType::InterestPayment)
+            .map(|e| e.time)
+            .collect();
+        assert!(!pr.is_empty());
+        for time in &pr {
+            assert!(ip.contains(time), "IP expected at redemption date {time}");
+        }
+        // The final accrual is paid at maturity.
+        assert_eq!(ip.last(), Some(&t("2027-01-01T00:00:00")));
+    }
+
+    #[test]
+    fn missing_redemption_terms_are_reported_not_panicked() {
+        let mut no_payment = array_rate_contract(json!({}));
+        no_payment.array_next_principal_redemption_payment = None;
+        no_payment.array_cycle_anchor_date_of_principal_redemption = None;
+        no_payment.array_cycle_of_principal_redemption = None;
+        no_payment.maturity_date = None;
+        assert!(matches!(
+            LaxEngine.evaluate(&no_payment, &StateProvider::new()),
+            Err(EngineError::MissingAttribute(_))
+        ));
+        let mut no_ied = array_rate_contract(json!({}));
+        no_ied.initial_exchange_date = None;
+        assert!(matches!(
+            LaxEngine.evaluate(&no_ied, &StateProvider::new()),
+            Err(EngineError::MissingAttribute("initialExchangeDate"))
+        ));
+    }
 }
