@@ -64,6 +64,7 @@ Useful checks:
 ```sh
 cargo test -p actus-web          # SSR state + rendered-document integration tests
 npm run typecheck --prefix crates/actus-web/assets   # tsc --noEmit over the client TS
+npm test --prefix crates/actus-web/assets            # view.ts unit tests (Vitest, 3 timezones)
 ```
 
 The integration tests build the WebUI protocol in-process from
