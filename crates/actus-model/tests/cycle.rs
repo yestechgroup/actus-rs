@@ -77,3 +77,94 @@ fn from_str_via_parse() {
         Cycle::parse("P1ML0").unwrap()
     );
 }
+
+#[test]
+fn period_and_stub_characters_round_trip() {
+    for (period, c) in [
+        (CyclePeriod::Day, 'D'),
+        (CyclePeriod::Week, 'W'),
+        (CyclePeriod::Month, 'M'),
+        (CyclePeriod::Year, 'Y'),
+    ] {
+        assert_eq!(period.as_char(), c);
+        assert_eq!(period.to_string(), c.to_string());
+        let json = serde_json::to_value(period).unwrap();
+        assert_eq!(json, serde_json::json!(c.to_string()));
+        assert_eq!(serde_json::from_value::<CyclePeriod>(json).unwrap(), period);
+        let lower = serde_json::json!(c.to_ascii_lowercase().to_string());
+        assert_eq!(
+            serde_json::from_value::<CyclePeriod>(lower).unwrap(),
+            period
+        );
+    }
+    for (stub, c) in [
+        (CycleStub::Long, 'L'),
+        (CycleStub::Short, 'R'),
+        (CycleStub::Undefined, 'U'),
+    ] {
+        assert_eq!(stub.as_char(), c);
+        assert_eq!(stub.to_string(), c.to_string());
+        let json = serde_json::to_value(stub).unwrap();
+        assert_eq!(json, serde_json::json!(c.to_string()));
+        assert_eq!(serde_json::from_value::<CycleStub>(json).unwrap(), stub);
+    }
+}
+
+#[test]
+fn period_and_stub_deserialization_rejects_unknown_and_empty_values() {
+    for raw in ["", "X", "Q"] {
+        let err = serde_json::from_value::<CyclePeriod>(serde_json::json!(raw)).unwrap_err();
+        assert!(
+            err.to_string().contains("period character") || err.to_string().contains("D, W, M, Y"),
+            "{raw:?}: {err}"
+        );
+    }
+    for raw in ["", "S", "X"] {
+        let err = serde_json::from_value::<CycleStub>(serde_json::json!(raw)).unwrap_err();
+        assert!(
+            err.to_string().contains("stub character") || err.to_string().contains("L, R, U"),
+            "{raw:?}: {err}"
+        );
+    }
+    assert!(serde_json::from_value::<CyclePeriod>(serde_json::json!(1)).is_err());
+}
+
+#[test]
+fn cycle_deserialization_requires_a_string() {
+    let err = serde_json::from_value::<Cycle>(serde_json::json!(1)).unwrap_err();
+    assert!(err.to_string().contains("an ACTUS cycle term"), "{err}");
+    let err = serde_json::from_value::<Cycle>(serde_json::json!("P0ML0")).unwrap_err();
+    assert!(err.to_string().contains("P0ML0"), "{err}");
+}
+
+#[test]
+fn constructor_accepts_every_valid_shape_and_exposes_its_parts() {
+    let cycle = Cycle::new(3, CyclePeriod::Week, CycleStub::Short, 9).unwrap();
+    assert_eq!(cycle.length(), 3);
+    assert_eq!(cycle.period(), CyclePeriod::Week);
+    assert_eq!(cycle.stub(), CycleStub::Short);
+    assert_eq!(cycle.index(), 9);
+    assert_eq!(cycle.to_string(), "P3WR9");
+    assert_eq!(Cycle::parse(&cycle.to_string()).unwrap(), cycle);
+}
+
+#[test]
+fn parse_rejects_trailing_and_truncated_input() {
+    for raw in [
+        "P1M",
+        "P1ML",
+        "P1MLX",
+        "P1ML00",
+        "P1QL0",
+        "P1MQ0",
+        "PML0",
+        "1ML0",
+        "P99999999999ML0",
+    ] {
+        assert!(
+            matches!(Cycle::parse(raw), Err(ModelError::InvalidCycle(_))),
+            "{raw:?} should be rejected"
+        );
+    }
+    assert_eq!(Cycle::parse("  p1ml0 ").unwrap().to_string(), "P1ML0");
+}
