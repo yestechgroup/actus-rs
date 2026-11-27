@@ -141,7 +141,7 @@ impl ContractEngine for PamEngine {
             }
             let payoff = ctx.apply(&mut state, slot, terms, risk)?;
             let reported = slot.emit >= ctx.ied;
-            if !reported || !ctx.observed(slot.emit, terms) {
+            if !reported || !ctx.observed(slot.emit, slot.kind.priority(), terms) {
                 continue;
             }
             events.push(ContractEvent {
@@ -212,8 +212,8 @@ impl Context {
     /// Whether an event at `t` is observed: the analysis window starts at the
     /// status date (progressed contracts) and at the purchase date when `PRD`
     /// is set, and ends at termination when `TD` is set.
-    fn observed(&self, t: NaiveDateTime, terms: &ContractTerms) -> bool {
-        fixed_income::observed(self.t0, t, None, terms)
+    fn observed(&self, t: NaiveDateTime, priority: u8, terms: &ContractTerms) -> bool {
+        fixed_income::observed(self.t0, t, priority, terms)
     }
 
     /// Builds the PAM event skeleton in deterministic (calculation time,
@@ -704,5 +704,44 @@ mod tests {
             ip.payoff,
             dec!(-10) + dec!(90) / dec!(365) * dec!(0.05) * dec!(-1000),
         );
+    }
+
+    /// #28: an IP due on the purchase date settles with the seller. It
+    /// still changes the state (the accrued interest is paid out), but the
+    /// buyer's schedule does not report it, as in the official lam02 fixture.
+    #[test]
+    fn interest_due_on_the_purchase_date_is_not_reported() {
+        let terms = terms(json!({
+            "contractType": "PAM",
+            "contractRole": "RPA",
+            "statusDate": "2012-12-30T00:00:00",
+            "initialExchangeDate": "2013-01-01T00:00:00",
+            "maturityDate": "2014-01-01T00:00:00",
+            "notionalPrincipal": "1000",
+            "nominalInterestRate": "0.05",
+            "cycleAnchorDateOfInterestPayment": "2013-04-01T00:00:00",
+            "cycleOfInterestPayment": "P3ML0",
+            "dayCountConvention": "A365",
+            "purchaseDate": "2013-04-01T00:00:00",
+            "priceAtPurchaseDate": "990"
+        }));
+        let events = PamEngine.evaluate(&terms, &risk()).expect("events");
+        let first = &events[0];
+        assert_eq!(first.event_type, EventType::Purchase);
+        assert_eq!(first.time, t("2013-04-01T00:00:00"));
+        // The IP at the purchase date already paid the accrual to the seller,
+        // so the price carries no accrued interest.
+        assert_eq!(first.payoff, dec!(-990));
+        assert_eq!(first.state.accrued_interest, Decimal::ZERO);
+        assert!(!events
+            .iter()
+            .any(|e| e.event_type == EventType::InterestPayment && e.time == first.time));
+        // The buyer's first IP accrues from the purchase date (91 days).
+        let ip = events
+            .iter()
+            .find(|e| e.event_type == EventType::InterestPayment)
+            .expect("first IP after purchase");
+        assert_eq!(ip.time, t("2013-07-01T00:00:00"));
+        assert_close(ip.payoff, dec!(91) / dec!(365) * dec!(0.05) * dec!(1000));
     }
 }

@@ -212,22 +212,21 @@ pub(crate) fn scales_interest(effect: Option<ScalingEffect>) -> bool {
 /// Whether an event at `t` is reported, given the status date and the
 /// purchase/termination window.
 ///
-/// `sequence` is the dictionary sequence number of the event. When it is
-/// `Some`, events at the purchase date that precede `PRD` in the sequence
-/// are suppressed (LAM, NAM, ANN, LAX). PAM passes `None` and reports every
-/// event at the purchase date.
+/// `sequence` is the dictionary sequence number of the event. Events at the
+/// purchase date that precede `PRD` in the sequence (an `IP` or `PR` due
+/// that day) still change the state but are not reported: they settle with
+/// the seller (the official lam02 fixture pins this).
 pub(crate) fn observed(
     t0: NaiveDateTime,
     t: NaiveDateTime,
-    sequence: Option<u8>,
+    sequence: u8,
     terms: &ContractTerms,
 ) -> bool {
     if t < t0 {
         return false;
     }
     if let Some(prd) = terms.purchase_date {
-        let precedes_purchase =
-            sequence.is_some_and(|rank| t == prd && rank < EventType::Purchase.priority());
+        let precedes_purchase = t == prd && sequence < EventType::Purchase.priority();
         if t < prd || precedes_purchase {
             return false;
         }
@@ -485,30 +484,31 @@ mod tests {
         }));
         let t0 = t("2013-01-01T00:00:00");
         let ip = EventType::InterestPayment.priority();
-        assert!(!observed(t0, t("2012-12-31T00:00:00"), Some(ip), &terms));
-        assert!(!observed(t0, t("2013-03-31T00:00:00"), Some(ip), &terms));
-        assert!(observed(t0, t("2013-07-01T00:00:00"), Some(ip), &terms));
-        assert!(observed(t0, t("2013-10-01T00:00:00"), Some(ip), &terms));
-        assert!(!observed(t0, t("2013-10-02T00:00:00"), Some(ip), &terms));
+        assert!(!observed(t0, t("2012-12-31T00:00:00"), ip, &terms));
+        assert!(!observed(t0, t("2013-03-31T00:00:00"), ip, &terms));
+        assert!(observed(t0, t("2013-07-01T00:00:00"), ip, &terms));
+        assert!(observed(t0, t("2013-10-01T00:00:00"), ip, &terms));
+        assert!(!observed(t0, t("2013-10-02T00:00:00"), ip, &terms));
     }
 
     #[test]
-    fn same_timestamp_purchase_suppression_is_opt_in() {
+    fn events_preceding_the_purchase_at_its_date_are_not_reported() {
         let terms = quarterly_loan(json!({ "purchaseDate": "2013-04-01T00:00:00" }));
         let t0 = t("2013-01-01T00:00:00");
         let prd = t("2013-04-01T00:00:00");
-        let before_purchase = EventType::InterestPayment.priority();
-        assert!(before_purchase < EventType::Purchase.priority());
-        // LAM/NAM/ANN/LAX: an IP at the purchase date is not reported.
-        assert!(!observed(t0, prd, Some(before_purchase), &terms));
-        assert!(observed(
-            t0,
-            prd,
-            Some(EventType::Purchase.priority()),
-            &terms
-        ));
-        // PAM: every event at the purchase date is reported.
-        assert!(observed(t0, prd, None, &terms));
+        let ip = EventType::InterestPayment.priority();
+        let pr = EventType::PrincipalRedemption.priority();
+        let purchase = EventType::Purchase.priority();
+        let maturity = EventType::Maturity.priority();
+        assert!(ip < purchase && pr < purchase && maturity > purchase);
+        // An IP or PR due on the purchase date settles with the seller.
+        assert!(!observed(t0, prd, ip, &terms));
+        assert!(!observed(t0, prd, pr, &terms));
+        // The purchase itself, and anything after it in the sequence, is reported.
+        assert!(observed(t0, prd, purchase, &terms));
+        assert!(observed(t0, prd, maturity, &terms));
+        // Later dates are unaffected by the sequence.
+        assert!(observed(t0, t("2013-07-01T00:00:00"), ip, &terms));
     }
 
     #[test]

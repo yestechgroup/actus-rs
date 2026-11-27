@@ -307,7 +307,7 @@ impl Context {
     /// purchase date itself the events preceding `PRD` in the dictionary
     /// sequence mutate the state but are not reported.
     fn observed(&self, t: NaiveDateTime, rank: u8, terms: &ContractTerms) -> bool {
-        fixed_income::observed(self.t0, t, Some(rank), terms)
+        fixed_income::observed(self.t0, t, rank, terms)
     }
 
     /// Builds the ANN event skeleton in deterministic (calculation time,

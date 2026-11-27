@@ -299,7 +299,7 @@ impl Context {
     /// purchase date itself the events preceding `PRD` in the dictionary
     /// sequence mutate the state but are not reported.
     fn observed(&self, t: NaiveDateTime, priority: u8, terms: &ContractTerms) -> bool {
-        fixed_income::observed(self.t0, t, Some(priority), terms)
+        fixed_income::observed(self.t0, t, priority, terms)
     }
 
     /// Builds the LAM event skeleton in deterministic (calculation time,
