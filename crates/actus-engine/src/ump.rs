@@ -178,7 +178,7 @@ impl ContractEngine for UmpEngine {
                 });
             }
         }
-        ctx.scheduled_slots(terms, &mut slots, &observed);
+        ctx.scheduled_slots(terms, &mut slots, &observed)?;
         slots.sort_by_key(|slot| (slot.time, slot.kind.priority()));
 
         let mut state = ContractState::initial(terms);
@@ -222,7 +222,7 @@ impl Context {
         terms: &ContractTerms,
         slots: &mut Vec<Slot>,
         observed: &[(NaiveDateTime, EventType)],
-    ) {
+    ) -> Result<(), EngineError> {
         let series = [
             (
                 terms.cycle_of_interest_payment.as_ref(),
@@ -250,7 +250,7 @@ impl Context {
             let Some(termination) = self.termination else {
                 continue;
             };
-            for time in roll_series(anchor, cycle, Some(termination)) {
+            for time in roll_series(anchor, cycle, Some(termination))? {
                 if time <= self.ied || time <= self.t0 || time >= termination {
                     continue;
                 }
@@ -260,6 +260,7 @@ impl Context {
                 slots.push(Slot { kind, time });
             }
         }
+        Ok(())
     }
 
     /// Applies the state transition and payoff function of one slot and
@@ -339,16 +340,16 @@ fn roll_series(
     anchor: NaiveDateTime,
     cycle: &Cycle,
     termination: Option<NaiveDateTime>,
-) -> Vec<NaiveDateTime> {
+) -> Result<Vec<NaiveDateTime>, EngineError> {
     let Some(termination) = termination else {
-        return vec![anchor];
+        return Ok(vec![anchor]);
     };
     let eomc = EndOfMonthConvention::Sd;
     let mut rolls = vec![anchor];
     let mut index: u64 = 0;
     loop {
         index += 1;
-        let next = cycle_step(anchor, index, cycle, eomc);
+        let next = cycle_step(anchor, index, cycle, eomc)?;
         if next >= termination {
             break;
         }
@@ -357,7 +358,7 @@ fn roll_series(
             break;
         }
     }
-    rolls
+    Ok(rolls)
 }
 
 #[cfg(test)]

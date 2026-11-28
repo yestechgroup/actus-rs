@@ -10,8 +10,9 @@ use actus_model::{
     InterestCalculationBase,
 };
 
-use crate::schedule::{cycle_step, generate_schedule, shift_business_day};
+use crate::schedule::{cycle_step, generate_schedule, shift_business_day, MAX_SCHEDULE_ROLLS};
 use crate::state::ContractState;
+use crate::EngineError;
 
 /// The contract role sign (techspec section "Contract Role Sign
 /// Convention").
@@ -45,7 +46,7 @@ pub fn roll(
     index: u64,
     cycle: &Cycle,
     eomc: EndOfMonthConvention,
-) -> NaiveDateTime {
+) -> Result<NaiveDateTime, EngineError> {
     cycle_step(anchor, index, cycle, eomc)
 }
 
@@ -61,6 +62,10 @@ pub fn roll(
 /// shifted date. A termination at or before the anchor yields the
 /// single-element schedule `[termination]`: the schedule end belongs to the
 /// schedule even when the anchor rolled past it.
+///
+/// # Errors
+/// [`EngineError::InvalidSchedule`] under the same limits as
+/// [`generate_schedule`].
 pub fn anchored_series(
     anchor: NaiveDateTime,
     cycle: &Cycle,
@@ -68,23 +73,30 @@ pub fn anchored_series(
     eomc: EndOfMonthConvention,
     bdc: BusinessDayConvention,
     cal: Calendar,
-) -> Vec<(NaiveDateTime, NaiveDateTime)> {
+) -> Result<Vec<(NaiveDateTime, NaiveDateTime)>, EngineError> {
     if termination <= anchor {
-        return vec![(termination, termination)];
+        return Ok(vec![(termination, termination)]);
     }
     let mut calc = vec![anchor];
     let mut index: u64 = 0;
     loop {
         index += 1;
-        let next = roll(anchor, index, cycle, eomc);
+        let next = roll(anchor, index, cycle, eomc)?;
         if next >= termination {
             break;
         }
         calc.push(next);
+        if index > MAX_SCHEDULE_ROLLS {
+            return Err(EngineError::InvalidSchedule(format!(
+                "cycle {cycle} from {anchor} to {termination} needs more than \
+                 {MAX_SCHEDULE_ROLLS} schedule elements"
+            )));
+        }
     }
     calc.push(termination);
     let last = calc.len() - 1;
-    calc.into_iter()
+    Ok(calc
+        .into_iter()
         .enumerate()
         .map(|(position, t)| {
             let emit = if position < last {
@@ -94,7 +106,7 @@ pub fn anchored_series(
             };
             (t, emit)
         })
-        .collect()
+        .collect())
 }
 
 /// The state transition input time of one schedule element under `bdc`.
@@ -126,6 +138,9 @@ pub fn calculation_time(
 /// the identity keys of the schedule elements: series that must not
 /// duplicate a date (the `IP` series against the `IPCI` capitalization
 /// dates) deduplicate on them, independent of the convention.
+///
+/// # Errors
+/// As [`generate_schedule`].
 pub fn stub_series_unshifted(
     anchor: NaiveDateTime,
     cycle: &Cycle,
@@ -133,7 +148,7 @@ pub fn stub_series_unshifted(
     eomc: EndOfMonthConvention,
     bdc: BusinessDayConvention,
     cal: Calendar,
-) -> Vec<(NaiveDateTime, NaiveDateTime)> {
+) -> Result<Vec<(NaiveDateTime, NaiveDateTime)>, EngineError> {
     let unshifted = generate_schedule(
         anchor,
         cycle,
@@ -141,9 +156,9 @@ pub fn stub_series_unshifted(
         eomc,
         BusinessDayConvention::Nos,
         cal,
-    );
-    let emit = generate_schedule(anchor, cycle, termination, eomc, bdc, cal);
-    unshifted.into_iter().zip(emit).collect()
+    )?;
+    let emit = generate_schedule(anchor, cycle, termination, eomc, bdc, cal)?;
+    Ok(unshifted.into_iter().zip(emit).collect())
 }
 
 /// Unrolls one cyclic series into (calculation time, emission time) pairs
@@ -155,6 +170,9 @@ pub fn stub_series_unshifted(
 /// the termination. Under `CS*` conventions the calculation times are the
 /// unshifted schedule (generated with `NOS`) paired with the shifted emission
 /// times; every other convention calculates where it emits.
+///
+/// # Errors
+/// As [`generate_schedule`].
 pub fn stub_series(
     anchor: NaiveDateTime,
     cycle: &Cycle,
@@ -162,11 +180,13 @@ pub fn stub_series(
     eomc: EndOfMonthConvention,
     bdc: BusinessDayConvention,
     cal: Calendar,
-) -> Vec<(NaiveDateTime, NaiveDateTime)> {
-    stub_series_unshifted(anchor, cycle, termination, eomc, bdc, cal)
-        .into_iter()
-        .map(|(unshifted, shifted)| (calculation_time(bdc, unshifted, shifted), shifted))
-        .collect()
+) -> Result<Vec<(NaiveDateTime, NaiveDateTime)>, EngineError> {
+    Ok(
+        stub_series_unshifted(anchor, cycle, termination, eomc, bdc, cal)?
+            .into_iter()
+            .map(|(unshifted, shifted)| (calculation_time(bdc, unshifted, shifted), shifted))
+            .collect(),
+    )
 }
 
 /// Whether the interest calculation base amount tracks the notional.

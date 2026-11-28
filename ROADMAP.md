@@ -65,7 +65,7 @@ Tracking: [#9](https://github.com/yestechgroup/actus-rs/issues/9)
 
 Fix the cheap and embarrassing things first.
 
-- Add a root `LICENSE` (Apache-2.0), plus `CHANGELOG.md`, `CONTRIBUTING.md`
+- Add a root `LICENSE` (MIT), plus `CHANGELOG.md`, `CONTRIBUTING.md`
   and `SECURITY.md`.
 - Add `actus_engine::default_registry()` with all 18 engines and make
   `evaluate()` use it. Remove the duplicate registries in conformance and wasm.

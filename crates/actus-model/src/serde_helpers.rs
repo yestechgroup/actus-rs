@@ -5,7 +5,7 @@
 //! modules are wired in via `#[serde(deserialize_with = ...)]` on the
 //! `Option<T>` fields of [`crate::terms::ContractTerms`].
 
-use chrono::NaiveDateTime;
+use chrono::{Datelike, NaiveDateTime, NaiveTime};
 use rust_decimal::Decimal;
 use serde::de::Error as DeError;
 use serde::de::{Deserializer, Unexpected, Visitor};
@@ -60,17 +60,41 @@ pub fn timestamp_from_value(
     }
 }
 
+/// The years an ACTUS timestamp may carry: ISO 8601 four-digit years.
+///
+/// Bounding input dates keeps every date the engine derives from them (at
+/// most one cycle past the latest input date) far inside the representable
+/// calendar, so schedule arithmetic never meets the calendar's edge.
+pub const YEAR_RANGE: std::ops::RangeInclusive<i32> = 1..=9999;
+
 /// Parse an ACTUS timestamp in any of the three accepted shapes.
-pub fn parse_timestamp(raw: &str) -> Result<NaiveDateTime, chrono::format::ParseError> {
+///
+/// # Errors
+/// The text matches none of the shapes, or the year is outside
+/// [`YEAR_RANGE`] (signed or zero years such as `-0001` or `+262142`).
+pub fn parse_timestamp(raw: &str) -> Result<NaiveDateTime, TimestampError> {
     let s = raw.trim();
-    if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
-        return Ok(dt);
+    let parsed = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
+        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M"))
+        .or_else(|_| {
+            chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").map(|d| d.and_time(NaiveTime::MIN))
+        })
+        .map_err(TimestampError::Format)?;
+    if !YEAR_RANGE.contains(&parsed.year()) {
+        return Err(TimestampError::YearOutOfRange(parsed.year()));
     }
-    if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M") {
-        return Ok(dt);
-    }
-    let date = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")?;
-    Ok(date.and_hms_opt(0, 0, 0).expect("midnight is a valid time"))
+    Ok(parsed)
+}
+
+/// Why a timestamp was rejected by [`parse_timestamp`].
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum TimestampError {
+    /// Not an ACTUS timestamp shape.
+    #[error("{0}")]
+    Format(chrono::format::ParseError),
+    /// A well-formed date whose year is outside [`YEAR_RANGE`].
+    #[error("year {0} is outside 1..=9999")]
+    YearOutOfRange(i32),
 }
 
 /// Serialize a timestamp in the canonical second-precision ACTUS form.
@@ -82,6 +106,7 @@ pub fn timestamp_to_string(value: &NaiveDateTime) -> String {
 pub mod decimal_option {
     use super::*;
 
+    /// Serde `deserialize_with` entry point of [`decimal_option`](self).
     pub fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> Result<Option<Decimal>, D::Error> {
@@ -124,6 +149,7 @@ pub mod decimal_option {
         deserializer.deserialize_any(DecimalOptionVisitor)
     }
 
+    /// Serde `serialize_with` entry point of [`decimal_option`](self).
     pub fn serialize<S: Serializer>(
         value: &Option<Decimal>,
         serializer: S,
@@ -140,6 +166,7 @@ pub mod string_option {
     use serde::de::{Deserializer, Visitor};
     use std::fmt;
 
+    /// Serde `deserialize_with` entry point of [`string_option`](self).
     pub fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> Result<Option<String>, D::Error> {
@@ -174,6 +201,7 @@ pub mod string_vec_option {
     use serde::de::{Deserializer, Error as DeError, Visitor};
     use std::fmt;
 
+    /// Serde `deserialize_with` entry point of [`string_vec_option`](self).
     pub fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> Result<Option<Vec<String>>, D::Error> {
@@ -214,6 +242,7 @@ pub mod string_vec_option {
 pub mod timestamp_option {
     use super::*;
 
+    /// Serde `deserialize_with` entry point of [`timestamp_option`](self).
     pub fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> Result<Option<NaiveDateTime>, D::Error> {
@@ -244,6 +273,7 @@ pub mod timestamp_option {
         deserializer.deserialize_any(TimestampOptionVisitor)
     }
 
+    /// Serde `serialize_with` entry point of [`timestamp_option`](self).
     pub fn serialize<S: Serializer>(
         value: &Option<NaiveDateTime>,
         serializer: S,
@@ -268,6 +298,7 @@ pub mod timestamp_vec_option {
     use super::*;
     use serde::de::Error as DeError;
 
+    /// Serde `deserialize_with` entry point of [`timestamp_vec_option`](self).
     pub fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> Result<Option<Vec<NaiveDateTime>>, D::Error> {
@@ -306,6 +337,7 @@ pub mod timestamp_vec_option {
         deserializer.deserialize_any(TimestampVecOptionVisitor)
     }
 
+    /// Serde `serialize_with` entry point of [`timestamp_vec_option`](self).
     pub fn serialize<S: Serializer>(
         value: &Option<Vec<NaiveDateTime>>,
         serializer: S,
@@ -325,6 +357,7 @@ pub mod decimal_vec_option {
     use super::*;
     use serde::de::Error as DeError;
 
+    /// Serde `deserialize_with` entry point of [`decimal_vec_option`](self).
     pub fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> Result<Option<Vec<Decimal>>, D::Error> {
@@ -374,6 +407,7 @@ pub mod decimal_vec_option {
         deserializer.deserialize_any(DecimalVecOptionVisitor)
     }
 
+    /// Serde `serialize_with` entry point of [`decimal_vec_option`](self).
     pub fn serialize<S: Serializer>(
         value: &Option<Vec<Decimal>>,
         serializer: S,

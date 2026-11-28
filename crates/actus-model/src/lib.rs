@@ -23,6 +23,8 @@
 //! testbeds, the duplicated `SCMP` business day convention token, and
 //! `fixingDays` (in the testbeds, absent from dictionary v1.4).
 
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
 pub mod builders;
 pub mod cycle;
 pub mod enums;

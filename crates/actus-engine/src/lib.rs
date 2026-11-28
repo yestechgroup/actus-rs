@@ -24,6 +24,8 @@
 //! [`clm`], [`ump`], [`csh`], [`stk`], [`com`], [`fxout`], [`swppv`],
 //! [`swaps`], [`capfl`], [`optns`], [`futur`], [`ceg`], [`cec`].
 
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
 pub mod ann;
 pub mod capfl;
 pub mod cec;
@@ -82,6 +84,11 @@ pub enum EngineError {
         /// Observation time requested.
         at: String,
     },
+    /// The terms describe a schedule that cannot be generated: a cycle
+    /// increment outside the representable calendar, more schedule elements
+    /// than the engine's safety limit, or an undefined cycle stub indicator.
+    #[error("invalid schedule: {0}")]
+    InvalidSchedule(String),
     /// An event sequence produced an invalid state transition.
     #[error("invalid state transition: {0}")]
     InvalidTransition(String),

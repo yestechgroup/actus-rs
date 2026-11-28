@@ -44,6 +44,35 @@ impl EngineRegistry {
         Self::default()
     }
 
+    /// A registry with every contract type engine of this crate (18 of the
+    /// 21 dictionary types; BCS, CDSWP and MAR have no engine yet).
+    ///
+    /// This is the registry [`evaluate`] uses, and the one the conformance
+    /// harness and the WASM bindings use.
+    #[must_use]
+    pub fn with_all_engines() -> Self {
+        let mut registry = Self::new();
+        registry.register(Box::new(crate::pam::PamEngine));
+        registry.register(Box::new(crate::lam::LamEngine));
+        registry.register(Box::new(crate::lax::LaxEngine));
+        registry.register(Box::new(crate::nam::NamEngine));
+        registry.register(Box::new(crate::ann::AnnEngine));
+        registry.register(Box::new(crate::csh::CshEngine));
+        registry.register(Box::new(crate::clm::ClmEngine));
+        registry.register(Box::new(crate::ump::UmpEngine));
+        registry.register(Box::new(crate::stk::StkEngine));
+        registry.register(Box::new(crate::com::ComEngine));
+        registry.register(Box::new(crate::fxout::FxoutEngine));
+        registry.register(Box::new(crate::swppv::SwppvEngine));
+        registry.register(Box::new(crate::swaps::SwapsEngine));
+        registry.register(Box::new(crate::capfl::CapflEngine));
+        registry.register(Box::new(crate::optns::OptnsEngine));
+        registry.register(Box::new(crate::futur::FuturEngine));
+        registry.register(Box::new(crate::ceg::CegEngine));
+        registry.register(Box::new(crate::cec::CecEngine));
+        registry
+    }
+
     /// Registers an implementation for its contract type.
     ///
     /// A later registration for the same contract type takes precedence.
@@ -69,16 +98,18 @@ impl EngineRegistry {
     }
 }
 
-/// Evaluates a contract with the default engine registry.
+/// Evaluates a contract with every engine of this crate
+/// ([`EngineRegistry::with_all_engines`]).
 ///
-/// In this wave the default registry is empty, so every contract type yields
-/// [`EngineError::UnsupportedContractType`]; the PAM/LAM/NAM/ANN
-/// implementations of the contract wave register themselves here.
+/// # Errors
+/// [`EngineError::UnsupportedContractType`] for a type without an engine
+/// (BCS, CDSWP, MAR), otherwise whatever the type's engine reports (for
+/// example [`EngineError::MissingAttribute`]).
 pub fn evaluate(
     terms: &ContractTerms,
     risk: &dyn RiskFactorProvider,
 ) -> Result<Vec<ContractEvent>, EngineError> {
-    EngineRegistry::new().evaluate(terms, risk)
+    EngineRegistry::with_all_engines().evaluate(terms, risk)
 }
 
 #[cfg(test)]
@@ -125,13 +156,64 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_contract_type_is_reported() {
-        let terms = terms_of(ContractType::Pam);
-        let err = evaluate(&terms, &StateProviderStub).unwrap_err();
-        assert!(matches!(
-            err,
-            EngineError::UnsupportedContractType(ContractType::Pam)
-        ));
+    fn types_without_an_engine_are_reported_as_unsupported() {
+        for contract_type in [ContractType::Bcs, ContractType::Cdswp, ContractType::Mar] {
+            let err = evaluate(&terms_of(contract_type), &StateProviderStub).unwrap_err();
+            assert!(
+                matches!(err, EngineError::UnsupportedContractType(t) if t == contract_type),
+                "{contract_type:?}: {err}"
+            );
+        }
+    }
+
+    /// The public `evaluate` used to build an empty registry and reject
+    /// every contract (#20). Every type with an engine must now reach it:
+    /// with empty terms the engine itself reports what is missing.
+    #[test]
+    fn evaluate_reaches_an_engine_for_every_supported_type() {
+        let registry = EngineRegistry::with_all_engines();
+        let mut reached = 0;
+        for &contract_type in ContractType::ALL {
+            let unsupported = matches!(
+                evaluate(&terms_of(contract_type), &StateProviderStub),
+                Err(EngineError::UnsupportedContractType(_))
+            );
+            let registered = registry
+                .engines
+                .iter()
+                .any(|e| e.contract_type() == contract_type);
+            assert_eq!(unsupported, !registered, "{contract_type:?}");
+            reached += usize::from(registered);
+        }
+        assert_eq!(reached, 18, "one engine per supported type");
+    }
+
+    #[test]
+    fn evaluate_runs_a_real_contract() {
+        let terms: ContractTerms = serde_json::from_value(serde_json::json!({
+            "contractType": "PAM",
+            "contractRole": "RPA",
+            "statusDate": "2012-12-30T00:00:00",
+            "initialExchangeDate": "2013-01-01T00:00:00",
+            "maturityDate": "2014-01-01T00:00:00",
+            "notionalPrincipal": "1000",
+            "nominalInterestRate": "0.05",
+            "cycleAnchorDateOfInterestPayment": "2013-07-01T00:00:00",
+            "cycleOfInterestPayment": "P6ML0",
+            "dayCountConvention": "A365"
+        }))
+        .unwrap();
+        let events = evaluate(&terms, &StateProviderStub).expect("PAM evaluates");
+        let types: Vec<EventType> = events.iter().map(|e| e.event_type).collect();
+        assert_eq!(
+            types,
+            vec![
+                EventType::InitialExchange,
+                EventType::InterestPayment,
+                EventType::InterestPayment,
+                EventType::Maturity
+            ]
+        );
     }
 
     #[test]

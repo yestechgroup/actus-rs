@@ -7,6 +7,8 @@
 //! build-site` and `wasm-pack build crates/actus-wasm --target web
 //! --out-dir pkg` (see the crate README).
 
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
 pub mod state;
 
 use std::path::{Path, PathBuf};

@@ -1,6 +1,6 @@
 //! Day count fractions (ACTUS techspec section "Year Fraction Convention").
 
-use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 use rust_decimal::Decimal;
 
 use actus_model::DayCountConvention;
@@ -28,18 +28,14 @@ fn is_leap_year(year: i32) -> bool {
     (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
+/// The number of days in `month` (1-12) of the proleptic Gregorian `year`.
 pub(crate) fn days_in_month(year: i32, month: u32) -> u32 {
-    let (next_year, next_month) = if month == 12 {
-        (year + 1, 1)
-    } else {
-        (year, month + 1)
-    };
-    let first_of_next_month =
-        NaiveDate::from_ymd_opt(next_year, next_month, 1).expect("valid first of month");
-    first_of_next_month
-        .pred_opt()
-        .map(|last| last.day())
-        .unwrap_or(30)
+    match month {
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => 31,
+    }
 }
 
 fn is_last_day_of_month(t: NaiveDateTime) -> bool {
@@ -147,10 +143,10 @@ fn actual_actual(start: NaiveDateTime, end: NaiveDateTime) -> Decimal {
     let mut cursor = start;
     let mut total = Decimal::ZERO;
     while cursor < end {
+        // At the last representable year there is no next January 1; the
+        // segment then simply runs to `end`.
         let year_end = NaiveDate::from_ymd_opt(cursor.year() + 1, 1, 1)
-            .expect("january first of the next year is representable")
-            .and_hms_opt(0, 0, 0)
-            .expect("midnight is representable");
+            .map_or(end, |date| date.and_time(NaiveTime::MIN));
         let segment_end = if year_end < end { year_end } else { end };
         let days = whole_days(cursor, segment_end);
         let basis = if is_leap_year(cursor.year()) {

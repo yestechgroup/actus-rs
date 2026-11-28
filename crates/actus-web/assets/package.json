@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "description": "WebUI frontend assets of the ACTUS Explorer (templates, styles, client TypeScript)",
+  "license": "MIT",
   "scripts": {
     "bundle": "esbuild src/index.ts --bundle --format=esm --target=es2022 --outfile=../dist/index.js --external:/pkg/*",
     "typecheck": "tsc --noEmit",

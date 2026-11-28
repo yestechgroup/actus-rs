@@ -16,12 +16,20 @@ use serde_json::{json, Value};
 /// Metadata of one contract type as shown in the sidebar and header.
 #[derive(Debug, Clone)]
 pub struct TypeEntry {
+    /// Contract type acronym, e.g. `PAM`.
     pub acronym: String,
+    /// Human-readable name, e.g. `Principal at Maturity`.
     pub name: String,
+    /// Taxonomy category (`Basic`, `Combined`, `Credit Enhancement`, ...).
     pub category: String,
+    /// One-paragraph description shown in the header.
     pub description: String,
+    /// Techspec section reference of the type.
     pub spec: String,
+    /// The event types characteristic of the type, shown as chips.
     pub key_events: Vec<&'static str>,
+    /// Whether an engine is registered for the type (schedules can be
+    /// evaluated), as opposed to showing only the parameter form.
     pub has_engine: bool,
 }
 
@@ -102,11 +110,18 @@ fn sidebar_entry(entry: &TypeEntry) -> Value {
 /// One parameter field of the live form, with validation status.
 #[derive(Debug, Clone)]
 pub struct ParamView {
+    /// The field's spec: key, label, input kind, value and options.
     pub spec: ParamSpec,
+    /// Whether the dictionary marks the attribute required for the type.
     pub required: bool,
+    /// Whether the field currently has a value.
     pub set: bool,
+    /// Display status: `required-set`, `required-missing`, `optional-set`
+    /// or `optional-unset`.
     pub status: String,
+    /// Whether validation reported an error for the field.
     pub invalid: bool,
+    /// The validation error code (`MissingAttribute`, ...), empty if valid.
     pub error_code: String,
 }
 

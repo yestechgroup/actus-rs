@@ -358,3 +358,20 @@ fn null_array_elements_are_rejected_on_real_contract_terms() {
         assert!(err.contains("index 1"), "{attribute}: {err}");
     }
 }
+
+/// #20: input years are bounded to ISO 8601 four-digit years, which keeps
+/// every derived schedule date far from the edge of the representable
+/// calendar.
+#[test]
+fn parse_timestamp_bounds_years_to_four_digits() {
+    assert_eq!(parse_timestamp("0001-01-01").unwrap(), ts(1, 1, 1, 0, 0, 0));
+    assert_eq!(
+        parse_timestamp("9999-12-31T23:59:59").unwrap(),
+        ts(9999, 12, 31, 23, 59, 59)
+    );
+    for raw in ["0000-01-01", "-0001-01-01", "+262142-12-31", "+10000-01-01"] {
+        assert!(parse_timestamp(raw).is_err(), "{raw:?} should be rejected");
+    }
+    let err = parse_timestamp("0000-06-01").unwrap_err().to_string();
+    assert!(err.contains("outside 1..=9999"), "{err}");
+}

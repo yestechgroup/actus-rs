@@ -144,7 +144,7 @@ impl ContractEngine for PamEngine {
         fixed_income::evaluate_schedule(
             ctx.ied,
             ctx.t0,
-            ctx.schedule(terms),
+            ctx.schedule(terms)?,
             terms,
             || progressed_initial(&ctx, terms),
             || ContractState::initial(terms),
@@ -208,7 +208,7 @@ impl Context {
 
     /// Builds the PAM event skeleton in deterministic (calculation time,
     /// dictionary sequence) order.
-    fn schedule(&self, terms: &ContractTerms) -> Vec<Slot> {
+    fn schedule(&self, terms: &ContractTerms) -> Result<Vec<Slot>, EngineError> {
         let mut slots = vec![
             Slot {
                 kind: Kind::InitialExchange,
@@ -236,11 +236,11 @@ impl Context {
             });
         }
         if terms.nominal_interest_rate.is_some() {
-            self.interest_slots(terms, &mut slots);
-            self.rate_reset_slots(terms, &mut slots);
+            self.interest_slots(terms, &mut slots)?;
+            self.rate_reset_slots(terms, &mut slots)?;
         }
         slots.sort_by_key(|slot| (slot.calc, slot.kind.priority()));
-        slots
+        Ok(slots)
     }
 
     /// The `IPCI` and `IP` series (techspec PAM schedule rows IPCI and IP).
@@ -256,14 +256,19 @@ impl Context {
     /// diverge independently (a rolled `IP` date shifts, the `IPCED` schedule
     /// end never shifts), so only the unshifted dates identify the shared
     /// schedule points.
-    fn interest_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
-        let schedule = interest_schedule(&self.conventions(), terms);
+    fn interest_slots(
+        &self,
+        terms: &ContractTerms,
+        slots: &mut Vec<Slot>,
+    ) -> Result<(), EngineError> {
+        let schedule = interest_schedule(&self.conventions(), terms)?;
         for timing in schedule.capitalization {
             slots.push(Slot::timed(Kind::InterestCapitalization, timing));
         }
         for timing in schedule.payment {
             slots.push(Slot::timed(Kind::InterestPayment, timing));
         }
+        Ok(())
     }
 
     /// The `RR` rate reset series (techspec PAM schedule row RR).
@@ -273,10 +278,15 @@ impl Context {
     /// meaningless and does not occur in the testbeds). With `RRNXT` set, the
     /// first schedule point after the status date becomes a fixed reset `RRF`
     /// applying `RRNXT` instead of a market observation.
-    fn rate_reset_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
-        for (reset, timing) in rate_reset_schedule(&self.conventions(), terms) {
+    fn rate_reset_slots(
+        &self,
+        terms: &ContractTerms,
+        slots: &mut Vec<Slot>,
+    ) -> Result<(), EngineError> {
+        for (reset, timing) in rate_reset_schedule(&self.conventions(), terms)? {
             slots.push(Slot::timed(rate_reset_kind(reset), timing));
         }
+        Ok(())
     }
 
     /// Applies the state transition and payoff function of one slot

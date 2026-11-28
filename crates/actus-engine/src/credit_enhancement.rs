@@ -208,7 +208,7 @@ pub(crate) fn add_period(
             let eomc = terms
                 .end_of_month_convention
                 .unwrap_or(EndOfMonthConvention::Sd);
-            Ok(cycle_step(at, 1, &cycle, eomc))
+            Ok(cycle_step(at, 1, &cycle, eomc)?)
         }
         _ => Err(invalid()),
     }

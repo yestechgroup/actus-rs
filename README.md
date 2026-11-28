@@ -17,19 +17,22 @@ from inputs alone), `rust_decimal::Decimal` money, `chrono` timestamps,
 hermetic tests (the conformance corpus is seeded in-memory and pinned by hash;
 the actusfrf dictionary/techspecs/tests are vendored under `vendor/actus/`).
 
-## Status: dormant, conformance-tested
+## Status: pre-1.0, under active development
 
-The engine is complete for the v1 family (see `crates/actus-conformance/src/corpus.rs`
-for the covered/excluded matrix) and CI runs the differential conformance suite
-on every push.
+Engines exist for 18 of the 21 dictionary contract types (BCS, CDSWP and
+MAR have none yet), and `actus_engine::evaluate` dispatches to all of them.
+How thoroughly each type is checked varies:
 
-**Doctrine:** no new contract types, conventions, or features without a named
-consumer. Integration into a product toolchain is **deferred until a consumer
-names it** — a payment-schedule screen or API, or a second contract family.
-When that trigger fires: start with a thin mapper in the product codebase
-(first-template terms → `actus-engine::evaluate` for the needed types only);
-promote to a toolchain seam (e.g. a `rex_ir` consumer per yestechgroup/rexlang#10)
-only when a second consumer appears.
+- PAM, LAM, NAM and ANN pass their official actusfrf testbeds and agree
+  with an independent oracle on a 2048-case differential corpus.
+- LAX is gated on the LAM testbed and corpus (a LAX without arrays is a LAM).
+- CSH, CLM, SWAPS and CEC pass their official testbeds.
+- The remaining types have hand-computed unit tests only.
+
+CI runs all of it on every push, with a 95% line coverage floor. The plan
+to v1.0, including formal verification and the web explorer, is in
+[`ROADMAP.md`](ROADMAP.md). Who v1.0 is for is an open decision
+(yestechgroup/actus-rs#25).
 
 History note: these crates originated in [onboarding-os](https://github.com/yestechgroup/onboarding-os)
 (see its ADR 0001); that repo's `financial-domain` and `onboarding-extensions`
@@ -67,6 +70,6 @@ hand-computed golden tests.
 
 ## License
 
-Apache-2.0. The vendored ACTUS dictionary, techspecs, and testbed files under
-`vendor/actus/` carry their own licenses (see the `LICENSE.md`/`README.md`
-files in each subdirectory).
+MIT, see [`LICENSE`](LICENSE). The vendored ACTUS dictionary, techspecs, and
+testbed files under `vendor/actus/` carry their own licenses (see the
+`LICENSE.md`/`README.md` files in each subdirectory).

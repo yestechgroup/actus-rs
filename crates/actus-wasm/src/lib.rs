@@ -79,6 +79,8 @@
 //! Series lookups are step functions: the latest observation at or before
 //! the requested time applies.
 
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
 pub mod dto;
 pub mod specs;
 

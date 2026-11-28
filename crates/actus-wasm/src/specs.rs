@@ -13,10 +13,20 @@ use std::collections::BTreeMap;
 use actus_model::ContractType;
 use serde::Serialize;
 
-/// Input kind of one parameter field.
+/// Start date of generated example terms when the values carry no deal or
+/// status date. A `const` so an invalid date would fail to compile.
+const DEFAULT_START: chrono::NaiveDate = match chrono::NaiveDate::from_ymd_opt(2026, 1, 1) {
+    Some(date) => date,
+    None => panic!("2026-01-01 is a valid date"),
+};
+
+/// Input kind of a numeric parameter field.
 pub const KIND_NUMBER: &str = "number";
+/// Input kind of a date parameter field.
 pub const KIND_DATE: &str = "date";
+/// Input kind of a parameter field chosen from a fixed list of options.
 pub const KIND_SELECT: &str = "select";
+/// Input kind of a free-text parameter field.
 pub const KIND_TEXT: &str = "text";
 
 /// One parameter field of a contract type's form.
@@ -613,18 +623,12 @@ fn apply_swaps_structure(
         .into_iter()
         .chain(status_date)
         .max()
-        .unwrap_or_else(|| {
-            chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
-                .expect("valid date")
-                .and_hms_opt(0, 0, 0)
-                .expect("midnight")
-        });
+        .unwrap_or_else(|| DEFAULT_START.and_time(chrono::NaiveTime::MIN));
     let maturity = ied
         .date()
         .checked_add_months(chrono::Months::new(60))
         .unwrap_or(ied.date())
-        .and_hms_opt(0, 0, 0)
-        .expect("midnight");
+        .and_time(chrono::NaiveTime::MIN);
     let ied_text = ied.format("%Y-%m-%dT%H:%M:%S").to_string();
     let maturity_text = maturity.format("%Y-%m-%dT%H:%M:%S").to_string();
 
@@ -694,18 +698,12 @@ fn apply_cec_structure(
         .into_iter()
         .chain(parse("statusDate"))
         .max()
-        .unwrap_or_else(|| {
-            chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
-                .expect("valid date")
-                .and_hms_opt(0, 0, 0)
-                .expect("midnight")
-        });
+        .unwrap_or_else(|| DEFAULT_START.and_time(chrono::NaiveTime::MIN));
     let maturity = ied
         .date()
         .checked_add_months(chrono::Months::new(12))
         .unwrap_or(ied.date())
-        .and_hms_opt(0, 0, 0)
-        .expect("midnight");
+        .and_time(chrono::NaiveTime::MIN);
     let ied_text = ied.format("%Y-%m-%dT%H:%M:%S").to_string();
     let maturity_text = maturity.format("%Y-%m-%dT%H:%M:%S").to_string();
 

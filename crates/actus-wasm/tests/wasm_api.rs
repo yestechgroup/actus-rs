@@ -285,3 +285,59 @@ fn build_terms_json_rejects_unknown_types_and_malformed_values() {
         actus_wasm::dto::build_terms_json("PAM", r#"{"notionalPrincipal": 1000}"#).unwrap_err();
     assert!(err.starts_with("invalid values JSON"), "{err}");
 }
+
+/// PAM terms maturing at `maturity`, with extra attributes spliced in.
+fn pam_maturing(maturity: &str, extra: &str) -> String {
+    format!(
+        r#"{{"contractType":"PAM","contractRole":"RPA","statusDate":"2012-12-30T00:00:00",
+        "initialExchangeDate":"2013-01-01T00:00:00","maturityDate":"{maturity}",
+        "notionalPrincipal":"1000","nominalInterestRate":"0.05","dayCountConvention":"A365"{extra}}}"#
+    )
+}
+
+/// #20: terms that cannot describe a schedule used to panic deep in the
+/// schedule arithmetic, which aborts the whole WASM module in the browser.
+/// They must come back as ordinary errors instead.
+#[test]
+fn impossible_schedules_are_errors_not_panics() {
+    let ip = |cycle: &str| {
+        pam_maturing(
+            "2014-01-15T00:00:00",
+            &format!(
+                r#","cycleAnchorDateOfInterestPayment":"2013-02-01T00:00:00","cycleOfInterestPayment":"{cycle}""#
+            ),
+        )
+    };
+    let cases = [
+        ("cycle of ~4.3 billion months", ip("P4294967295ML0")),
+        ("cycle of ~4.3 billion days", ip("P4294967295DL0")),
+        ("cycle of ~4.3 billion weeks", ip("P4294967295WL0")),
+        ("cycle of ~4.3 billion years", ip("P4294967295YL0")),
+        // The maturity is not on a roll date, so the stub indicator is read.
+        ("undefined stub indicator", ip("P1ML5")),
+        (
+            "daily cycle over 5000 years",
+            pam_maturing(
+                "7013-01-01T00:00:00",
+                r#","cycleAnchorDateOfInterestPayment":"2013-01-02T00:00:00","cycleOfInterestPayment":"P1DL0""#,
+            ),
+        ),
+    ];
+    for (name, json) in cases {
+        let outcome = std::panic::catch_unwind(|| actus_wasm::dto::evaluate_json(&json));
+        let result = outcome.unwrap_or_else(|_| panic!("{name}: evaluation panicked"));
+        let err = result.expect_err(name);
+        assert!(err.contains("invalid schedule"), "{name}: {err}");
+    }
+}
+
+#[test]
+fn ordinary_schedules_still_evaluate() {
+    let json = pam_maturing(
+        "2014-01-15T00:00:00",
+        r#","cycleAnchorDateOfInterestPayment":"2013-02-01T00:00:00","cycleOfInterestPayment":"P1ML1""#,
+    );
+    let result: Value =
+        serde_json::from_str(&actus_wasm::dto::evaluate_json(&json).unwrap()).unwrap();
+    assert!(result["events"].as_array().is_some_and(|e| e.len() > 10));
+}
