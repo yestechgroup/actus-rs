@@ -67,10 +67,16 @@ fn functions() -> Vec<Function> {
             };
             let indent = &line[..line.len() - line.trim_start().len()];
             let closing = format!("{indent}}}");
-            let Some(end) = (start + 1..lines.len()).find(|&i| lines[i] == closing) else {
+            // The body starts after the line that opens it, so the
+            // parameters of a multi-line signature are not counted.
+            let Some(open) = (start..lines.len()).find(|&i| lines[i].trim_end().ends_with('{'))
+            else {
                 continue;
             };
-            let body = lines[start + 1..end]
+            let Some(end) = (open + 1..lines.len()).find(|&i| lines[i] == closing) else {
+                continue;
+            };
+            let body = lines[open + 1..end]
                 .iter()
                 .map(|line| line.trim())
                 .filter(|line| !line.is_empty() && !line.starts_with("//"))

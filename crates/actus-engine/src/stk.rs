@@ -140,7 +140,7 @@ pub(crate) fn evaluate_position(
             t0,
             termination,
             &mut slots,
-        );
+        )?;
     }
     if let Some(td) = termination {
         if td > t0 {
@@ -225,9 +225,9 @@ fn dividend_slots(
     t0: NaiveDateTime,
     termination: Option<NaiveDateTime>,
     slots: &mut Vec<Slot>,
-) {
+) -> Result<(), EngineError> {
     let Some(anchor) = terms.cycle_anchor_date_of_dividend.map(normalize_timestamp) else {
-        return;
+        return Ok(());
     };
     let amount = terms.next_dividend_payment_amount.unwrap_or(Decimal::ZERO);
     let payoff = sgn * quantity * amount;
@@ -241,7 +241,7 @@ fn dividend_slots(
                 let mut index: u64 = 0;
                 loop {
                     index += 1;
-                    let next = cycle_step(anchor, index, cycle, eomc);
+                    let next = cycle_step(anchor, index, cycle, eomc)?;
                     if next >= termination {
                         break;
                     }
@@ -268,6 +268,7 @@ fn dividend_slots(
             payoff,
         });
     }
+    Ok(())
 }
 
 /// The per-unit price at termination: the market observation of

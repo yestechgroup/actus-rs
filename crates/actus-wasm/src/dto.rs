@@ -325,33 +325,14 @@ fn parse_scenario_timestamp(raw: &str) -> Result<NaiveDateTime, String> {
     }
     let date = chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d")
         .map_err(|e| format!("invalid timestamp {raw:?}: {e}"))?;
-    Ok(date.and_hms_opt(0, 0, 0).expect("midnight is valid"))
+    Ok(date.and_time(chrono::NaiveTime::MIN))
 }
 
-/// The engine registry of the WASM bindings: one registered implementation
-/// per supported contract type (mirrors the conformance harness registry).
+/// The engine registry: every engine of `actus-engine`
+/// ([`EngineRegistry::with_all_engines`]).
 #[must_use]
 pub fn engine_registry() -> EngineRegistry {
-    let mut registry = EngineRegistry::new();
-    registry.register(Box::new(actus_engine::pam::PamEngine));
-    registry.register(Box::new(actus_engine::lam::LamEngine));
-    registry.register(Box::new(actus_engine::lax::LaxEngine));
-    registry.register(Box::new(actus_engine::nam::NamEngine));
-    registry.register(Box::new(actus_engine::ann::AnnEngine));
-    registry.register(Box::new(actus_engine::csh::CshEngine));
-    registry.register(Box::new(actus_engine::clm::ClmEngine));
-    registry.register(Box::new(actus_engine::ump::UmpEngine));
-    registry.register(Box::new(actus_engine::stk::StkEngine));
-    registry.register(Box::new(actus_engine::com::ComEngine));
-    registry.register(Box::new(actus_engine::fxout::FxoutEngine));
-    registry.register(Box::new(actus_engine::swppv::SwppvEngine));
-    registry.register(Box::new(actus_engine::swaps::SwapsEngine));
-    registry.register(Box::new(actus_engine::capfl::CapflEngine));
-    registry.register(Box::new(actus_engine::optns::OptnsEngine));
-    registry.register(Box::new(actus_engine::futur::FuturEngine));
-    registry.register(Box::new(actus_engine::ceg::CegEngine));
-    registry.register(Box::new(actus_engine::cec::CecEngine));
-    registry
+    EngineRegistry::with_all_engines()
 }
 
 /// `true` when the registry has an engine for the contract type. Probed by

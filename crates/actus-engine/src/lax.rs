@@ -180,7 +180,7 @@ impl ContractEngine for LaxEngine {
         fixed_income::evaluate_schedule(
             ctx.ied,
             ctx.t0,
-            ctx.schedule(terms),
+            ctx.schedule(terms)?,
             terms,
             || progressed_initial(&ctx, terms),
             || initial_state(&ctx, terms),
@@ -292,7 +292,7 @@ impl Context {
                         .to_string(),
                 ))?;
                 let steps = redemptions.saturating_sub(1);
-                normalize_timestamp(cycle_step(anchor, steps, cycle, eomc))
+                normalize_timestamp(cycle_step(anchor, steps, cycle, eomc)?)
             }
         };
         let next_principal_redemption = match terms.next_principal_redemption_payment {
@@ -310,10 +310,10 @@ impl Context {
                         eomc,
                         BusinessDayConvention::Nos,
                         cal,
-                    )
+                    )?
                     .len(),
                     (_, Some(anchor), Some(cycle)) => {
-                        stub_series(*anchor, cycle, maturity, eomc, bdc, cal).len()
+                        stub_series(*anchor, cycle, maturity, eomc, bdc, cal)?.len()
                     }
                     _ => {
                         return Err(EngineError::MissingAttribute(
@@ -384,7 +384,7 @@ impl Context {
 
     /// Builds the LAX event skeleton in deterministic (calculation time,
     /// dictionary sequence) order.
-    fn schedule(&self, terms: &ContractTerms) -> Vec<Slot> {
+    fn schedule(&self, terms: &ContractTerms) -> Result<Vec<Slot>, EngineError> {
         let mut slots = vec![
             Slot::at(Kind::InitialExchange, self.ied, self.ied),
             Slot::at(Kind::Maturity, self.maturity, self.maturity),
@@ -395,15 +395,15 @@ impl Context {
         if let Some(td) = terms.termination_date {
             slots.push(Slot::at(Kind::Termination, td, td));
         }
-        let principal_pairs = self.principal_redemption_slots(terms, &mut slots);
+        let principal_pairs = self.principal_redemption_slots(terms, &mut slots)?;
         if terms.nominal_interest_rate.is_some() {
-            self.interest_slots(terms, &principal_pairs, &mut slots);
-            self.rate_reset_slots(terms, &mut slots);
+            self.interest_slots(terms, &principal_pairs, &mut slots)?;
+            self.rate_reset_slots(terms, &mut slots)?;
         }
-        self.scaling_index_slots(terms, &mut slots);
-        self.interest_calculation_base_slots(terms, &mut slots);
+        self.scaling_index_slots(terms, &mut slots)?;
+        self.interest_calculation_base_slots(terms, &mut slots)?;
         slots.sort_by_key(|slot| (slot.calc, slot.kind.priority()));
-        slots
+        Ok(slots)
     }
 
     /// The (unshifted schedule date, emission time) pairs of one array
@@ -415,26 +415,28 @@ impl Context {
         &self,
         anchors: &[NaiveDateTime],
         cycles: &[Cycle],
-    ) -> Vec<(NaiveDateTime, NaiveDateTime)> {
-        array_series(
+    ) -> Result<Vec<(NaiveDateTime, NaiveDateTime)>, EngineError> {
+        let unshifted = array_series(
             anchors,
             cycles,
             self.maturity,
             self.eomc,
             BusinessDayConvention::Nos,
             self.cal,
-        )
-        .into_iter()
-        .zip(array_series(
+        )?;
+        let shifted = array_series(
             anchors,
             cycles,
             self.maturity,
             self.eomc,
             self.bdc,
             self.cal,
-        ))
-        .map(|((unshifted, _), (_, emitted))| (unshifted, emitted))
-        .collect()
+        )?;
+        Ok(unshifted
+            .into_iter()
+            .zip(shifted)
+            .map(|((unshifted, _), (_, emitted))| (unshifted, emitted))
+            .collect())
     }
 
     /// The schedule segment a date belongs to: the last anchor at or before
@@ -462,9 +464,9 @@ impl Context {
         &self,
         terms: &ContractTerms,
         slots: &mut Vec<Slot>,
-    ) -> Vec<(NaiveDateTime, NaiveDateTime)> {
+    ) -> Result<Vec<(NaiveDateTime, NaiveDateTime)>, EngineError> {
         if let Some((anchors, cycles)) = &self.principal_array {
-            let pairs = self.array_pairs(anchors, cycles);
+            let pairs = self.array_pairs(anchors, cycles)?;
             for (unshifted, emit) in &pairs {
                 let calc = calculation_time(self.bdc, *unshifted, *emit);
                 if calc >= self.maturity {
@@ -477,24 +479,24 @@ impl Context {
                     Self::segment_of(anchors, *unshifted),
                 ));
             }
-            return pairs;
+            return Ok(pairs);
         }
         let anchor = match terms.cycle_anchor_date_of_principal_redemption {
             Some(anchor) => normalize_timestamp(anchor),
-            None => return Vec::new(),
+            None => return Ok(Vec::new()),
         };
         let cycle = match terms.cycle_of_principal_redemption.as_ref() {
             Some(cycle) => cycle,
-            None => return Vec::new(),
+            None => return Ok(Vec::new()),
         };
-        let pairs = stub_series(anchor, cycle, self.maturity, self.eomc, self.bdc, self.cal);
+        let pairs = stub_series(anchor, cycle, self.maturity, self.eomc, self.bdc, self.cal)?;
         for (calc, emit) in &pairs {
             if *calc == self.maturity {
                 continue;
             }
             slots.push(Slot::at(Kind::PrincipalRedemption, *calc, *emit));
         }
-        pairs
+        Ok(pairs)
     }
 
     /// The `IPCI` and `IP` series.
@@ -514,16 +516,16 @@ impl Context {
         terms: &ContractTerms,
         principal_pairs: &[(NaiveDateTime, NaiveDateTime)],
         slots: &mut Vec<Slot>,
-    ) {
+    ) -> Result<(), EngineError> {
         if let Some((anchors, cycles)) = &self.interest_array {
-            for (unshifted, emit) in self.array_pairs(anchors, cycles) {
+            for (unshifted, emit) in self.array_pairs(anchors, cycles)? {
                 let calc = calculation_time(self.bdc, unshifted, emit);
                 if calc > self.maturity {
                     continue;
                 }
                 slots.push(Slot::at(Kind::InterestPayment, calc, emit));
             }
-            return;
+            return Ok(());
         }
         let anchor = terms
             .cycle_anchor_date_of_interest_payment
@@ -550,15 +552,16 @@ impl Context {
                     self.maturity,
                 ));
             }
-            return;
+            return Ok(());
         }
-        let schedule = interest_schedule(&self.conventions(), terms);
+        let schedule = interest_schedule(&self.conventions(), terms)?;
         for timing in schedule.capitalization {
             slots.push(Slot::timed(Kind::InterestCapitalization, timing));
         }
         for timing in schedule.payment {
             slots.push(Slot::timed(Kind::InterestPayment, timing));
         }
+        Ok(())
     }
 
     /// The `RR` rate reset series.
@@ -569,9 +572,13 @@ impl Context {
     /// time. Otherwise the LAM machinery applies: the scalar series unrolls
     /// from `RRANX`, and with `RRNXT` set the first schedule point after the
     /// status date becomes a fixed reset `RRF` (lam14).
-    fn rate_reset_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
+    fn rate_reset_slots(
+        &self,
+        terms: &ContractTerms,
+        slots: &mut Vec<Slot>,
+    ) -> Result<(), EngineError> {
         if let Some((anchors, cycles)) = &self.rate_array {
-            let mut pairs = self.array_pairs(anchors, cycles);
+            let mut pairs = self.array_pairs(anchors, cycles)?;
             if pairs.last().map(|(_, emit)| *emit) == Some(self.maturity) {
                 pairs.pop();
             }
@@ -587,28 +594,39 @@ impl Context {
                     Self::segment_of(anchors, unshifted),
                 ));
             }
-            return;
+            return Ok(());
         }
-        for (reset, timing) in rate_reset_schedule(&self.conventions(), terms) {
+        for (reset, timing) in rate_reset_schedule(&self.conventions(), terms)? {
             slots.push(Slot::timed(rate_reset_kind(reset), timing));
         }
+        Ok(())
     }
 
     /// The `SC` scaling index series (as in LAM): `S(SCANX, SCCL, MD)`
     /// without the maturity element.
-    fn scaling_index_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
-        for timing in scaling_index_schedule(&self.conventions(), terms) {
+    fn scaling_index_slots(
+        &self,
+        terms: &ContractTerms,
+        slots: &mut Vec<Slot>,
+    ) -> Result<(), EngineError> {
+        for timing in scaling_index_schedule(&self.conventions(), terms)? {
             slots.push(Slot::timed(Kind::ScalingIndexFixing, timing));
         }
+        Ok(())
     }
 
     /// The `IPCB` interest calculation base fixing series (as in LAM):
     /// defined only for `IPCB = NTL`, unrolled from `IPCBANX` to maturity
     /// without the maturity element.
-    fn interest_calculation_base_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
-        for timing in interest_calculation_base_schedule(&self.conventions(), terms) {
+    fn interest_calculation_base_slots(
+        &self,
+        terms: &ContractTerms,
+        slots: &mut Vec<Slot>,
+    ) -> Result<(), EngineError> {
+        for timing in interest_calculation_base_schedule(&self.conventions(), terms)? {
             slots.push(Slot::timed(Kind::InterestCalculationBaseFixing, timing));
         }
+        Ok(())
     }
 
     /// The scheduled principal redemption payment of one segment

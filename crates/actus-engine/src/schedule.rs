@@ -7,8 +7,9 @@ use chrono::{Datelike, Duration, Months, NaiveDate, NaiveDateTime, Weekday};
 use actus_model::{BusinessDayConvention, Calendar, Cycle, CyclePeriod, EndOfMonthConvention};
 
 use crate::daycount::days_in_month;
+use crate::EngineError;
 
-const MAX_SCHEDULE_ROLLS: u64 = 100_000;
+pub(crate) const MAX_SCHEDULE_ROLLS: u64 = 100_000;
 const MAX_SHIFT_HOPS: u32 = 366;
 
 /// Last-stub scheme of a schedule (techspec section "Schedule", stub `S`).
@@ -30,12 +31,21 @@ pub enum LastStub {
 }
 
 /// Resolves the last-stub scheme of a cycle from its stub indicator digit.
-fn last_stub(cycle: &Cycle) -> LastStub {
+fn last_stub(cycle: &Cycle) -> Result<LastStub, EngineError> {
     match cycle.index() {
-        0 => LastStub::Long,
-        1 => LastStub::Short,
-        other => panic!("unknown cycle stub indicator {other} in cycle {cycle}"),
+        0 => Ok(LastStub::Long),
+        1 => Ok(LastStub::Short),
+        other => Err(EngineError::InvalidSchedule(format!(
+            "cycle {cycle} has stub indicator {other}; only 0 (long) and 1 (short) are defined"
+        ))),
     }
+}
+
+/// The error for a cycle increment that leaves the representable calendar.
+fn out_of_calendar(anchor: NaiveDateTime, steps: u64, cycle: &Cycle) -> EngineError {
+    EngineError::InvalidSchedule(format!(
+        "{steps} x {cycle} from {anchor} is outside the representable calendar"
+    ))
 }
 
 /// ACTUS Business Day Function (techspec section "Business Day Calendar").
@@ -85,7 +95,7 @@ pub fn shift_business_day(
         return t;
     }
     let original_month = t.month();
-    type ShiftFn = fn(NaiveDateTime) -> NaiveDateTime;
+    type ShiftFn = fn(NaiveDateTime) -> Option<NaiveDateTime>;
     let (forward, backward): (ShiftFn, ShiftFn) = match direction {
         Direction::Following => (next_day, previous_day),
         Direction::Preceding => (previous_day, next_day),
@@ -98,35 +108,38 @@ pub fn shift_business_day(
     }
 }
 
+/// Steps from `t` until a business day of `cal`. At the edge of the
+/// representable calendar there is nowhere to step to, so the date is kept.
 fn walk_to_business_day(
     t: NaiveDateTime,
     cal: Calendar,
-    step: impl Fn(NaiveDateTime) -> NaiveDateTime,
+    step: impl Fn(NaiveDateTime) -> Option<NaiveDateTime>,
 ) -> NaiveDateTime {
     let mut candidate = t;
     let mut hops = 0;
     while !is_business_day(candidate, cal) {
-        candidate = step(candidate);
+        let Some(next) = step(candidate) else {
+            return candidate;
+        };
+        candidate = next;
         hops += 1;
-        if hops > MAX_SHIFT_HOPS {
-            panic!("business day shift exceeded {MAX_SHIFT_HOPS} hops; calendar yields no business days");
-        }
+        // INVARIANT: every `Calendar` has business days at most two days
+        // apart (`NC`: every day; `MF`: Monday to Friday), so this limit is
+        // never reached. It guards against a future calendar without any.
+        assert!(
+            hops <= MAX_SHIFT_HOPS,
+            "business day shift exceeded {MAX_SHIFT_HOPS} hops; calendar yields no business days"
+        );
     }
     candidate
 }
 
-fn next_day(t: NaiveDateTime) -> NaiveDateTime {
-    t.date()
-        .succ_opt()
-        .expect("date successor is representable")
-        .and_time(t.time())
+fn next_day(t: NaiveDateTime) -> Option<NaiveDateTime> {
+    Some(t.date().succ_opt()?.and_time(t.time()))
 }
 
-fn previous_day(t: NaiveDateTime) -> NaiveDateTime {
-    t.date()
-        .pred_opt()
-        .expect("date predecessor is representable")
-        .and_time(t.time())
+fn previous_day(t: NaiveDateTime) -> Option<NaiveDateTime> {
+    Some(t.date().pred_opt()?.and_time(t.time()))
 }
 
 fn is_last_day_of_month(t: NaiveDateTime) -> bool {
@@ -138,8 +151,11 @@ fn month_has_less_than_31_days(t: NaiveDateTime) -> bool {
 }
 
 fn last_day_of_month(t: NaiveDateTime) -> NaiveDateTime {
-    let date = NaiveDate::from_ymd_opt(t.year(), t.month(), days_in_month(t.year(), t.month()))
-        .expect("last day of month is representable");
+    let last = days_in_month(t.year(), t.month());
+    // INVARIANT: `t` is a valid date, so its year and month are in range and
+    // `days_in_month` is a valid day of that month.
+    let date = NaiveDate::from_ymd_opt(t.year(), t.month(), last)
+        .expect("the last day of a valid date's month exists");
     date.and_time(t.time())
 }
 
@@ -154,36 +170,44 @@ fn add_cycle(
     i: u64,
     cycle: &Cycle,
     snap_to_month_end: bool,
-) -> NaiveDateTime {
-    let length = u64::from(cycle.length());
-    let steps = length * i;
+) -> Result<NaiveDateTime, EngineError> {
+    let overflow = || out_of_calendar(anchor, i, cycle);
+    let steps = u64::from(cycle.length())
+        .checked_mul(i)
+        .ok_or_else(overflow)?;
+    let add_days = |days: u64| {
+        i64::try_from(days)
+            .ok()
+            .and_then(Duration::try_days)
+            .and_then(|delta| anchor.checked_add_signed(delta))
+            .ok_or_else(overflow)
+    };
+    let months = |count: Option<u64>| {
+        count
+            .and_then(|m| u32::try_from(m).ok())
+            .ok_or_else(overflow)
+    };
     match cycle.period() {
-        CyclePeriod::Day => anchor + Duration::days(steps as i64),
-        CyclePeriod::Week => anchor + Duration::days((steps * 7) as i64),
-        CyclePeriod::Month => add_months(
-            anchor,
-            u32::try_from(steps).unwrap_or(u32::MAX),
-            snap_to_month_end,
-        ),
-        CyclePeriod::Year => add_months(
-            anchor,
-            u32::try_from(steps * 12).unwrap_or(u32::MAX),
-            snap_to_month_end,
-        ),
+        CyclePeriod::Day => add_days(steps),
+        CyclePeriod::Week => add_days(steps.checked_mul(7).ok_or_else(overflow)?),
+        CyclePeriod::Month => {
+            add_months(anchor, months(Some(steps))?, snap_to_month_end).ok_or_else(overflow)
+        }
+        CyclePeriod::Year => add_months(anchor, months(steps.checked_mul(12))?, snap_to_month_end)
+            .ok_or_else(overflow),
     }
 }
 
-fn add_months(t: NaiveDateTime, months: u32, snap_to_month_end: bool) -> NaiveDateTime {
-    let date = t
-        .date()
-        .checked_add_months(Months::new(months))
-        .unwrap_or_else(|| panic!("month arithmetic overflows for {t} + {months} months"));
+/// `t` plus `months` calendar months (day of month clamped), or `None`
+/// outside the representable calendar.
+fn add_months(t: NaiveDateTime, months: u32, snap_to_month_end: bool) -> Option<NaiveDateTime> {
+    let date = t.date().checked_add_months(Months::new(months))?;
     let shifted = date.and_time(t.time());
-    if snap_to_month_end {
+    Some(if snap_to_month_end {
         last_day_of_month(shifted)
     } else {
         shifted
-    }
+    })
 }
 
 /// Whether the End Of Month Shift Convention snaps rolled dates to month ends.
@@ -212,14 +236,15 @@ fn snaps_to_month_end(anchor: NaiveDateTime, cycle: &Cycle, eomc: EndOfMonthConv
 /// capitalization end date, where the rolled dates must obey the same EOM
 /// snapping rule as the unrolled series itself.
 ///
-/// Panics when the increment overflows the calendar; such inputs cannot
-/// describe a valid contract schedule.
+/// # Errors
+/// [`EngineError::InvalidSchedule`] when the increment leaves the
+/// representable calendar (for example a cycle of billions of months).
 pub fn cycle_step(
     anchor: NaiveDateTime,
     i: u64,
     cycle: &Cycle,
     eomc: EndOfMonthConvention,
-) -> NaiveDateTime {
+) -> Result<NaiveDateTime, EngineError> {
     let snap_to_month_end = snaps_to_month_end(anchor, cycle, eomc);
     add_cycle(anchor, i, cycle, snap_to_month_end)
 }
@@ -238,34 +263,42 @@ pub fn cycle_step(
 /// The ANN annuity recalculation uses this to start the discount chain one
 /// full cycle before the first remaining redemption payment.
 ///
-/// Panics when the subtraction overflows the calendar; such inputs cannot
-/// describe a valid contract schedule.
+/// # Errors
+/// [`EngineError::InvalidSchedule`] when the subtraction leaves the
+/// representable calendar.
 pub fn cycle_back(
     anchor: NaiveDateTime,
     cycle: &Cycle,
     eomc: EndOfMonthConvention,
-) -> NaiveDateTime {
+) -> Result<NaiveDateTime, EngineError> {
     let snap_to_month_end = snaps_to_month_end(anchor, cycle, eomc);
+    let overflow = || out_of_calendar(anchor, 1, cycle);
     let length = u64::from(cycle.length());
-    let date = match cycle.period() {
-        CyclePeriod::Day => anchor - Duration::days(length as i64),
-        CyclePeriod::Week => anchor - Duration::days((length * 7) as i64),
-        CyclePeriod::Month => anchor
-            .date()
-            .checked_sub_months(Months::new(u32::try_from(length).unwrap_or(u32::MAX)))
-            .unwrap_or_else(|| panic!("month arithmetic overflows for {anchor} - {length} months"))
-            .and_time(anchor.time()),
-        CyclePeriod::Year => anchor
-            .date()
-            .checked_sub_months(Months::new(u32::try_from(length * 12).unwrap_or(u32::MAX)))
-            .unwrap_or_else(|| panic!("month arithmetic overflows for {anchor} - {length} years"))
-            .and_time(anchor.time()),
+    let sub_days = |days: u64| {
+        i64::try_from(days)
+            .ok()
+            .and_then(Duration::try_days)
+            .and_then(|delta| anchor.checked_sub_signed(delta))
+            .ok_or_else(overflow)
     };
-    if snap_to_month_end {
+    let sub_months = |months: u64| {
+        u32::try_from(months)
+            .ok()
+            .and_then(|m| anchor.date().checked_sub_months(Months::new(m)))
+            .map(|date| date.and_time(anchor.time()))
+            .ok_or_else(overflow)
+    };
+    let date = match cycle.period() {
+        CyclePeriod::Day => sub_days(length)?,
+        CyclePeriod::Week => sub_days(length * 7)?,
+        CyclePeriod::Month => sub_months(length)?,
+        CyclePeriod::Year => sub_months(length * 12)?,
+    };
+    Ok(if snap_to_month_end {
         last_day_of_month(date)
     } else {
         date
-    }
+    })
 }
 
 /// ACTUS schedule function S(s, c, T, EOMC, BDC) (techspec section "Schedule").
@@ -283,10 +316,13 @@ pub fn cycle_back(
 ///    i.e. t_1..t_(n-1) per the techspec; the final schedule element
 ///    (`termination`) is not shifted.
 ///
-/// Degenerate input `termination <= anchor` yields `[anchor]`. A cycle that
-/// rolls more than [`MAX_SCHEDULE_ROLLS`] times, or a business day shift that
-/// exceeds [`MAX_SHIFT_HOPS`] hops, panics: such inputs cannot describe a
-/// valid contract schedule and must fail loudly.
+/// Degenerate input `termination <= anchor` yields `[anchor]`.
+///
+/// # Errors
+/// [`EngineError::InvalidSchedule`] when the cycle rolls more than
+/// [`MAX_SCHEDULE_ROLLS`] times before `termination` (for example a daily
+/// cycle over millennia), when a roll leaves the representable calendar, or
+/// when an overshooting cycle has an undefined stub indicator.
 pub fn generate_schedule(
     anchor: NaiveDateTime,
     cycle: &Cycle,
@@ -294,9 +330,9 @@ pub fn generate_schedule(
     eomc: EndOfMonthConvention,
     bdc: BusinessDayConvention,
     cal: Calendar,
-) -> Vec<NaiveDateTime> {
+) -> Result<Vec<NaiveDateTime>, EngineError> {
     if termination <= anchor {
-        return vec![anchor];
+        return Ok(vec![anchor]);
     }
     let snap_to_month_end = snaps_to_month_end(anchor, cycle, eomc);
     let mut rolled = vec![anchor];
@@ -304,18 +340,21 @@ pub fn generate_schedule(
     let roll_overshot_termination;
     loop {
         i += 1;
-        let next = add_cycle(anchor, i, cycle, snap_to_month_end);
+        let next = add_cycle(anchor, i, cycle, snap_to_month_end)?;
         if next >= termination {
             roll_overshot_termination = next > termination;
             break;
         }
         rolled.push(next);
         if i > MAX_SCHEDULE_ROLLS {
-            panic!("schedule generation exceeded {MAX_SCHEDULE_ROLLS} cycle rolls; cycle is too fine for the given termination");
+            return Err(EngineError::InvalidSchedule(format!(
+                "cycle {cycle} from {anchor} to {termination} needs more than \
+                 {MAX_SCHEDULE_ROLLS} schedule elements"
+            )));
         }
     }
     if roll_overshot_termination {
-        if matches!(last_stub(cycle), LastStub::Long) && rolled.len() > 1 {
+        if matches!(last_stub(cycle)?, LastStub::Long) && rolled.len() > 1 {
             rolled.pop();
         }
         rolled.push(termination);
@@ -323,7 +362,7 @@ pub fn generate_schedule(
         rolled.push(termination);
     }
     let final_index = rolled.len() - 1;
-    rolled
+    let shifted = rolled
         .into_iter()
         .enumerate()
         .map(|(index, t)| {
@@ -333,7 +372,8 @@ pub fn generate_schedule(
                 t
             }
         })
-        .collect()
+        .collect();
+    Ok(shifted)
 }
 
 /// ACTUS array schedule function (paper §3.2 "Array Schedule").
@@ -365,9 +405,8 @@ pub fn generate_schedule(
 /// indicator of each segment's cycle drives the stub correction of that
 /// segment exactly as in [`generate_schedule`].
 ///
-/// Panics under the same conditions as [`generate_schedule`] and
-/// [`cycle_back`]: calendar overflow or a cycle too fine for the segment,
-/// which cannot describe a valid contract schedule.
+/// # Errors
+/// As [`generate_schedule`] and [`cycle_back`], for any segment.
 pub fn array_schedule(
     anchors: &[NaiveDateTime],
     cycles: &[Cycle],
@@ -375,11 +414,11 @@ pub fn array_schedule(
     eomc: EndOfMonthConvention,
     bdc: BusinessDayConvention,
     cal: Calendar,
-) -> Vec<NaiveDateTime> {
-    array_series(anchors, cycles, end, eomc, bdc, cal)
+) -> Result<Vec<NaiveDateTime>, EngineError> {
+    Ok(array_series(anchors, cycles, end, eomc, bdc, cal)?
         .into_iter()
         .map(|(_, emitted)| emitted)
-        .collect()
+        .collect())
 }
 
 /// The array schedule as (unshifted schedule date, emission time) pairs.
@@ -390,6 +429,9 @@ pub fn array_schedule(
 /// date (the same construction as [`crate::common::stub_series_unshifted`]
 /// for the regular schedule). Both halves come from the same segments, so
 /// the pairing is positional and the counts agree by construction.
+///
+/// # Errors
+/// As [`array_schedule`].
 pub fn array_series(
     anchors: &[NaiveDateTime],
     cycles: &[Cycle],
@@ -397,20 +439,19 @@ pub fn array_series(
     eomc: EndOfMonthConvention,
     bdc: BusinessDayConvention,
     cal: Calendar,
-) -> Vec<(NaiveDateTime, NaiveDateTime)> {
-    if anchors.is_empty() || cycles.is_empty() {
-        return Vec::new();
-    }
-    let cycle_at = |index: usize| {
-        cycles
-            .get(index)
-            .unwrap_or_else(|| cycles.last().expect("non-empty"))
+) -> Result<Vec<(NaiveDateTime, NaiveDateTime)>, EngineError> {
+    let Some(last_cycle) = cycles.last() else {
+        return Ok(Vec::new());
     };
+    if anchors.is_empty() {
+        return Ok(Vec::new());
+    }
+    let cycle_at = |index: usize| cycles.get(index).unwrap_or(last_cycle);
     let mut unshifted: Vec<NaiveDateTime> = Vec::new();
     for (index, anchor) in anchors.iter().enumerate() {
         let cycle = cycle_at(index);
         let termination = match anchors.get(index + 1) {
-            Some(next) => cycle_back(*next, cycle, eomc),
+            Some(next) => cycle_back(*next, cycle, eomc)?,
             None => end,
         };
         unshifted.extend(generate_schedule(
@@ -420,10 +461,10 @@ pub fn array_series(
             eomc,
             BusinessDayConvention::Nos,
             cal,
-        ));
+        )?);
     }
     let last = unshifted.len().saturating_sub(1);
-    unshifted
+    Ok(unshifted
         .into_iter()
         .enumerate()
         .map(|(position, t)| {
@@ -434,7 +475,7 @@ pub fn array_series(
             };
             (t, emitted)
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
@@ -464,7 +505,8 @@ mod tests {
             EndOfMonthConvention::Sd,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         assert_eq!(
             schedule,
             d(&[
@@ -494,7 +536,8 @@ mod tests {
             EndOfMonthConvention::Eom,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         assert_eq!(
             schedule,
             d(&[
@@ -520,7 +563,8 @@ mod tests {
             EndOfMonthConvention::Sd,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         assert_eq!(
             schedule,
             d(&[
@@ -547,7 +591,8 @@ mod tests {
             EndOfMonthConvention::Eom,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         assert_eq!(schedule.first(), Some(&t("2013-02-28T00:00:00")));
         assert_eq!(schedule.get(1), Some(&t("2013-03-31T00:00:00")));
         assert_eq!(schedule.get(2), Some(&t("2013-04-30T00:00:00")));
@@ -573,7 +618,8 @@ mod tests {
             EndOfMonthConvention::Eom,
             BusinessDayConvention::Scf,
             Calendar::Mf,
-        );
+        )
+        .unwrap();
         assert_eq!(
             schedule,
             d(&[
@@ -603,7 +649,8 @@ mod tests {
                 EndOfMonthConvention::Eom,
                 bdc,
                 Calendar::Mf,
-            );
+            )
+            .unwrap();
             assert_eq!(
                 schedule,
                 d(&[
@@ -634,7 +681,8 @@ mod tests {
             EndOfMonthConvention::Eom,
             BusinessDayConvention::Csf,
             Calendar::Mf,
-        );
+        )
+        .unwrap();
         assert_eq!(schedule.get(2), Some(&t("2013-04-01T00:00:00")));
         assert_eq!(schedule.get(5), Some(&t("2013-07-01T00:00:00")));
         assert_eq!(schedule.get(7), Some(&t("2013-09-02T00:00:00")));
@@ -650,7 +698,8 @@ mod tests {
             EndOfMonthConvention::Eom,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         assert_eq!(
             schedule,
             d(&[
@@ -679,7 +728,8 @@ mod tests {
             EndOfMonthConvention::Eom,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         assert_eq!(
             schedule,
             d(&[
@@ -709,7 +759,8 @@ mod tests {
             EndOfMonthConvention::Eom,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         assert_eq!(
             eom_schedule,
             d(&[
@@ -729,7 +780,8 @@ mod tests {
             EndOfMonthConvention::Sd,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         assert_eq!(
             sd_schedule,
             d(&[
@@ -752,7 +804,8 @@ mod tests {
             EndOfMonthConvention::Eom,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         assert_eq!(
             schedule,
             d(&[
@@ -776,7 +829,8 @@ mod tests {
             EndOfMonthConvention::Eom,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         assert_eq!(
             eom_schedule,
             d(&[
@@ -795,7 +849,8 @@ mod tests {
             EndOfMonthConvention::Sd,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         assert_eq!(sd_schedule.get(3), Some(&t("2024-02-28T00:00:00")));
     }
 
@@ -808,7 +863,8 @@ mod tests {
             EndOfMonthConvention::Eom,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         assert_eq!(
             schedule,
             d(&[
@@ -828,7 +884,8 @@ mod tests {
             EndOfMonthConvention::Sd,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         assert_eq!(
             schedule,
             d(&[
@@ -849,7 +906,8 @@ mod tests {
             EndOfMonthConvention::Sd,
             BusinessDayConvention::Scf,
             Calendar::Mf,
-        );
+        )
+        .unwrap();
         assert_eq!(
             schedule,
             d(&[
@@ -905,7 +963,8 @@ mod tests {
             EndOfMonthConvention::Sd,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         assert_eq!(equal, d(&["2013-01-01T00:00:00"]));
 
         let inverted = generate_schedule(
@@ -915,7 +974,8 @@ mod tests {
             EndOfMonthConvention::Sd,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         assert_eq!(inverted, d(&["2013-01-01T00:00:00"]));
     }
 
@@ -931,6 +991,7 @@ mod tests {
                 BusinessDayConvention::Nos,
                 Calendar::Nc,
             )
+            .unwrap()
         });
         assert!(result.is_err());
     }
@@ -947,7 +1008,8 @@ mod tests {
             EndOfMonthConvention::Sd,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         assert_eq!(
             schedule,
             d(&[
@@ -970,7 +1032,8 @@ mod tests {
             EndOfMonthConvention::Sd,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         // Segment 0 runs monthly to one cycle before the next anchor
         // (2027-01-01 minus 1M = 2026-12-01); segment 1 rolls quarterly from
         // 2027-01-01, keeps the overshooting roll (short last stub) and
@@ -1012,7 +1075,8 @@ mod tests {
             EndOfMonthConvention::Sd,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         // Long last stub: the 2027-12-01 roll is removed and the final period
         // is extended to the schedule end.
         assert_eq!(long_last.len(), 20);
@@ -1036,7 +1100,8 @@ mod tests {
             EndOfMonthConvention::Sd,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         // Short last stub: the overshooting roll is kept and the schedule end
         // is appended after it.
         assert_eq!(short_last.len(), 21);
@@ -1057,7 +1122,8 @@ mod tests {
                 EndOfMonthConvention::Sd,
                 BusinessDayConvention::Nos,
                 Calendar::Nc,
-            ),
+            )
+            .unwrap(),
             generate_schedule(
                 t("2023-11-01T00:00:00"),
                 &cycles[0],
@@ -1066,6 +1132,7 @@ mod tests {
                 BusinessDayConvention::Nos,
                 Calendar::Nc,
             )
+            .unwrap()
         );
     }
 
@@ -1080,6 +1147,7 @@ mod tests {
             BusinessDayConvention::Nos,
             Calendar::Nc,
         )
+        .unwrap()
         .is_empty());
         assert!(array_schedule(
             &[anchor],
@@ -1089,6 +1157,7 @@ mod tests {
             BusinessDayConvention::Nos,
             Calendar::Nc,
         )
+        .unwrap()
         .is_empty());
     }
 
@@ -1104,7 +1173,8 @@ mod tests {
             EndOfMonthConvention::Eom,
             BusinessDayConvention::Nos,
             Calendar::Nc,
-        );
+        )
+        .unwrap();
         assert_eq!(
             schedule,
             d(&[
@@ -1134,7 +1204,8 @@ mod tests {
             EndOfMonthConvention::Sd,
             BusinessDayConvention::Scf,
             Calendar::Mf,
-        );
+        )
+        .unwrap();
         assert_eq!(
             schedule,
             d(&[
@@ -1158,7 +1229,8 @@ mod tests {
             EndOfMonthConvention::Sd,
             BusinessDayConvention::Scf,
             Calendar::Mf,
-        );
+        )
+        .unwrap();
         let unshifted: Vec<NaiveDateTime> = series.iter().map(|(calc, _)| *calc).collect();
         assert_eq!(
             unshifted,

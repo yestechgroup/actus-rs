@@ -189,7 +189,7 @@ impl ContractEngine for AnnEngine {
         fixed_income::evaluate_schedule(
             ctx.ied,
             ctx.t0,
-            ctx.schedule(terms),
+            ctx.schedule(terms)?,
             terms,
             || progressed_initial(&ctx, terms),
             || initial_state(&ctx, terms),
@@ -276,7 +276,7 @@ impl Context {
             eomc,
             BusinessDayConvention::Nos,
             cal,
-        );
+        )?;
         if redemption_times.is_empty() {
             return Err(EngineError::InvalidTransition(
                 "principal redemption schedule is empty".to_string(),
@@ -300,7 +300,7 @@ impl Context {
 
     /// Builds the ANN event skeleton in deterministic (calculation time,
     /// dictionary sequence) order.
-    fn schedule(&self, terms: &ContractTerms) -> Vec<Slot> {
+    fn schedule(&self, terms: &ContractTerms) -> Result<Vec<Slot>, EngineError> {
         let mut slots = vec![
             Slot {
                 kind: Kind::InitialExchange,
@@ -327,17 +327,17 @@ impl Context {
                 emit: td,
             });
         }
-        let first_redemption = self.principal_redemption_slots(terms, &mut slots);
+        let first_redemption = self.principal_redemption_slots(terms, &mut slots)?;
         let rate_resets = if terms.nominal_interest_rate.is_some() {
-            self.interest_slots(terms, &mut slots);
-            self.rate_reset_slots(terms, &mut slots)
+            self.interest_slots(terms, &mut slots)?;
+            self.rate_reset_slots(terms, &mut slots)?
         } else {
             Vec::new()
         };
         self.principal_fixing_slots(terms, first_redemption, &rate_resets, &mut slots);
-        self.interest_calculation_base_slots(terms, &mut slots);
+        self.interest_calculation_base_slots(terms, &mut slots)?;
         slots.sort_by_key(|slot| (slot.calc, slot.kind.rank()));
-        slots
+        Ok(slots)
     }
 
     /// The `PR` principal redemption series (techspec ANN schedule row PR,
@@ -348,13 +348,13 @@ impl Context {
         &self,
         terms: &ContractTerms,
         slots: &mut Vec<Slot>,
-    ) -> Option<NaiveDateTime> {
-        let schedule = principal_redemption_schedule(&self.conventions(), terms);
+    ) -> Result<Option<NaiveDateTime>, EngineError> {
+        let schedule = principal_redemption_schedule(&self.conventions(), terms)?;
         let first = schedule.first().map(|timing| timing.emit);
         for timing in schedule {
             slots.push(Slot::timed(Kind::PrincipalRedemption, timing));
         }
-        first
+        Ok(first)
     }
 
     /// The `IPCI` and `IP` series (techspec ANN schedule rows IPCI and IP).
@@ -369,14 +369,19 @@ impl Context {
     /// under `SC*` conventions the emission dates of the two series diverge
     /// independently, so only the unshifted dates identify the shared
     /// schedule points.
-    fn interest_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
-        let schedule = interest_schedule(&self.conventions(), terms);
+    fn interest_slots(
+        &self,
+        terms: &ContractTerms,
+        slots: &mut Vec<Slot>,
+    ) -> Result<(), EngineError> {
+        let schedule = interest_schedule(&self.conventions(), terms)?;
         for timing in schedule.capitalization {
             slots.push(Slot::timed(Kind::InterestCapitalization, timing));
         }
         for timing in schedule.payment {
             slots.push(Slot::timed(Kind::InterestPayment, timing));
         }
+        Ok(())
     }
 
     /// The `RR`/`RRF` rate reset series (techspec ANN schedule row RR,
@@ -386,13 +391,17 @@ impl Context {
     /// element; with `RRNXT` set, the first schedule point after the status
     /// date becomes a fixed reset `RRF` applying `RRNXT` instead of a market
     /// observation (ann16). Returns the reset slots for the fixing series.
-    fn rate_reset_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) -> Vec<Slot> {
-        let resets: Vec<Slot> = rate_reset_schedule(&self.conventions(), terms)
+    fn rate_reset_slots(
+        &self,
+        terms: &ContractTerms,
+        slots: &mut Vec<Slot>,
+    ) -> Result<Vec<Slot>, EngineError> {
+        let resets: Vec<Slot> = rate_reset_schedule(&self.conventions(), terms)?
             .into_iter()
             .map(|(reset, timing)| Slot::timed(rate_reset_kind(reset), timing))
             .collect();
         slots.extend_from_slice(&resets);
-        resets
+        Ok(resets)
     }
 
     /// The `PRF` principal fixing series, present only when the `PRNXT`
@@ -429,10 +438,15 @@ impl Context {
     /// The `IPCB` interest calculation base fixing series (techspec ANN
     /// schedule row IPCB, "Same as LAM"): defined only for `IPCB = NTL`,
     /// unrolled from `IPCBANX` to maturity without the maturity element.
-    fn interest_calculation_base_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
-        for timing in interest_calculation_base_schedule(&self.conventions(), terms) {
+    fn interest_calculation_base_slots(
+        &self,
+        terms: &ContractTerms,
+        slots: &mut Vec<Slot>,
+    ) -> Result<(), EngineError> {
+        for timing in interest_calculation_base_schedule(&self.conventions(), terms)? {
             slots.push(Slot::timed(Kind::InterestCalculationBaseFixing, timing));
         }
+        Ok(())
     }
 
     /// Recalculates the next principal redemption payment (techspec ANN
@@ -719,7 +733,7 @@ fn inferred_maturity(
     let unshifted = if steps == 0 {
         pranx
     } else {
-        cycle_step(pranx, steps, prcl, eomc)
+        cycle_step(pranx, steps, prcl, eomc)?
     };
     Ok(shift_business_day(unshifted, bdc, cal))
 }

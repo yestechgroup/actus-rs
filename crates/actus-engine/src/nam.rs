@@ -177,7 +177,7 @@ impl ContractEngine for NamEngine {
         fixed_income::evaluate_schedule(
             ctx.ied,
             ctx.t0,
-            ctx.schedule(terms),
+            ctx.schedule(terms)?,
             terms,
             || progressed_initial(&ctx, terms),
             || initial_state(&ctx, terms),
@@ -271,7 +271,7 @@ impl Context {
 
     /// Builds the NAM event skeleton in deterministic (calculation time,
     /// dictionary sequence) order.
-    fn schedule(&self, terms: &ContractTerms) -> Vec<Slot> {
+    fn schedule(&self, terms: &ContractTerms) -> Result<Vec<Slot>, EngineError> {
         let mut slots = vec![
             Slot {
                 kind: Kind::InitialExchange,
@@ -298,23 +298,28 @@ impl Context {
                 emit: td,
             });
         }
-        self.principal_redemption_slots(terms, &mut slots);
+        self.principal_redemption_slots(terms, &mut slots)?;
         if terms.nominal_interest_rate.is_some() {
-            self.interest_slots(terms, &mut slots);
-            self.rate_reset_slots(terms, &mut slots);
+            self.interest_slots(terms, &mut slots)?;
+            self.rate_reset_slots(terms, &mut slots)?;
         }
-        self.interest_calculation_base_slots(terms, &mut slots);
+        self.interest_calculation_base_slots(terms, &mut slots)?;
         slots.sort_by_key(|slot| (slot.calc, slot.kind.priority()));
-        slots
+        Ok(slots)
     }
 
     /// The `PR` principal redemption series (techspec NAM schedule row PR):
     /// `S(PRANX, PRCL, MD)` without the maturity element, which the
     /// maturity event supersedes.
-    fn principal_redemption_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
-        for timing in principal_redemption_schedule(&self.conventions(), terms) {
+    fn principal_redemption_slots(
+        &self,
+        terms: &ContractTerms,
+        slots: &mut Vec<Slot>,
+    ) -> Result<(), EngineError> {
+        for timing in principal_redemption_schedule(&self.conventions(), terms)? {
             slots.push(Slot::timed(Kind::PrincipalRedemption, timing));
         }
+        Ok(())
     }
 
     /// The `IPCI` and `IP` series (techspec NAM schedule rows IPCI and IP).
@@ -329,14 +334,19 @@ impl Context {
     /// under `SC*` conventions the emission dates of the two series diverge
     /// independently, so only the unshifted dates identify the shared
     /// schedule points.
-    fn interest_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
-        let schedule = interest_schedule(&self.conventions(), terms);
+    fn interest_slots(
+        &self,
+        terms: &ContractTerms,
+        slots: &mut Vec<Slot>,
+    ) -> Result<(), EngineError> {
+        let schedule = interest_schedule(&self.conventions(), terms)?;
         for timing in schedule.capitalization {
             slots.push(Slot::timed(Kind::InterestCapitalization, timing));
         }
         for timing in schedule.payment {
             slots.push(Slot::timed(Kind::InterestPayment, timing));
         }
+        Ok(())
     }
 
     /// The `RR`/`RRF` rate reset series (techspec NAM schedule row RR).
@@ -345,19 +355,29 @@ impl Context {
     /// element; with `RRNXT` set, the first schedule point after the status
     /// date becomes a fixed reset `RRF` applying `RRNXT` instead of a market
     /// observation (nam13).
-    fn rate_reset_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
-        for (reset, timing) in rate_reset_schedule(&self.conventions(), terms) {
+    fn rate_reset_slots(
+        &self,
+        terms: &ContractTerms,
+        slots: &mut Vec<Slot>,
+    ) -> Result<(), EngineError> {
+        for (reset, timing) in rate_reset_schedule(&self.conventions(), terms)? {
             slots.push(Slot::timed(rate_reset_kind(reset), timing));
         }
+        Ok(())
     }
 
     /// The `IPCB` interest calculation base fixing series (techspec NAM
     /// schedule row IPCB): defined only for `IPCB = NTL`, unrolled from
     /// `IPCBANX` to maturity without the maturity element.
-    fn interest_calculation_base_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
-        for timing in interest_calculation_base_schedule(&self.conventions(), terms) {
+    fn interest_calculation_base_slots(
+        &self,
+        terms: &ContractTerms,
+        slots: &mut Vec<Slot>,
+    ) -> Result<(), EngineError> {
+        for timing in interest_calculation_base_schedule(&self.conventions(), terms)? {
             slots.push(Slot::timed(Kind::InterestCalculationBaseFixing, timing));
         }
+        Ok(())
     }
 
     /// Applies the state transition and payoff function of one slot
@@ -503,9 +523,9 @@ fn inferred_maturity(
     let t_minus = if pranx >= t0 {
         pranx
     } else {
-        normalize_timestamp(cycle_step(ied, 1, prcl, eomc))
+        normalize_timestamp(cycle_step(ied, 1, prcl, eomc)?)
     };
-    let period_end = normalize_timestamp(cycle_step(t_minus, 1, prcl, eomc));
+    let period_end = normalize_timestamp(cycle_step(t_minus, 1, prcl, eomc)?);
     let yf = day_count_fraction(t_minus, period_end, dcc)?;
     let period_interest = notional * yf * terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
     let net_redemption = prnxt - period_interest;
@@ -523,7 +543,7 @@ fn inferred_maturity(
                 "notional principal is not redeemable by the net redemption amount".to_string(),
             ))?;
     let steps = redemptions.saturating_sub(1);
-    Ok(normalize_timestamp(cycle_step(pranx, steps, prcl, eomc)))
+    Ok(normalize_timestamp(cycle_step(pranx, steps, prcl, eomc)?))
 }
 
 /// Builds the pre-initial-exchange-date state (techspec NAM states table,

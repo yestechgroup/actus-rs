@@ -72,20 +72,23 @@ pub(crate) enum RateReset {
 ///
 /// Elements up to `IPCED` become capitalizations; the payment series skips
 /// those dates. Empty when the anchor or the cycle is absent.
-pub(crate) fn interest_schedule(c: &Conventions, terms: &ContractTerms) -> InterestSchedule {
+pub(crate) fn interest_schedule(
+    c: &Conventions,
+    terms: &ContractTerms,
+) -> Result<InterestSchedule, EngineError> {
     let (Some(anchor), Some(cycle)) = (
         terms
             .cycle_anchor_date_of_interest_payment
             .map(normalize_timestamp),
         terms.cycle_of_interest_payment.as_ref(),
     ) else {
-        return InterestSchedule::default();
+        return Ok(InterestSchedule::default());
     };
     let mut schedule = InterestSchedule::default();
     let capitalized: BTreeSet<NaiveDateTime> =
         match terms.capitalization_end_date.map(normalize_timestamp) {
             Some(ipced) if ipced < c.maturity => {
-                let series = anchored_series(anchor, cycle, ipced, c.eomc, c.bdc, c.cal);
+                let series = anchored_series(anchor, cycle, ipced, c.eomc, c.bdc, c.cal)?;
                 let anchors = series.iter().map(|(unshifted, _)| *unshifted).collect();
                 schedule.capitalization = series
                     .into_iter()
@@ -98,7 +101,7 @@ pub(crate) fn interest_schedule(c: &Conventions, terms: &ContractTerms) -> Inter
             }
             _ => BTreeSet::new(),
         };
-    schedule.payment = stub_series_unshifted(anchor, cycle, c.maturity, c.eomc, c.bdc, c.cal)
+    schedule.payment = stub_series_unshifted(anchor, cycle, c.maturity, c.eomc, c.bdc, c.cal)?
         .into_iter()
         .filter(|(unshifted, _)| !capitalized.contains(unshifted))
         .map(|(unshifted, emit)| Timing {
@@ -106,7 +109,7 @@ pub(crate) fn interest_schedule(c: &Conventions, terms: &ContractTerms) -> Inter
             emit,
         })
         .collect();
-    schedule
+    Ok(schedule)
 }
 
 /// The `RR`/`RRF` series from `RRANX` with cycle `RRCL`, without the
@@ -117,21 +120,21 @@ pub(crate) fn interest_schedule(c: &Conventions, terms: &ContractTerms) -> Inter
 pub(crate) fn rate_reset_schedule(
     c: &Conventions,
     terms: &ContractTerms,
-) -> Vec<(RateReset, Timing)> {
+) -> Result<Vec<(RateReset, Timing)>, EngineError> {
     let (Some(anchor), Some(cycle)) = (
         terms
             .cycle_anchor_date_of_rate_reset
             .map(normalize_timestamp),
         terms.cycle_of_rate_reset.as_ref(),
     ) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    let mut series = stub_series(anchor, cycle, c.maturity, c.eomc, c.bdc, c.cal);
+    let mut series = stub_series(anchor, cycle, c.maturity, c.eomc, c.bdc, c.cal)?;
     if series.last().map(|(_, emit)| *emit) == Some(c.maturity) {
         series.pop();
     }
     let mut fixed_pending = terms.next_reset_rate.is_some();
-    series
+    Ok(series
         .into_iter()
         .map(|(calc, emit)| {
             let kind = if fixed_pending && calc > c.t0 {
@@ -142,7 +145,7 @@ pub(crate) fn rate_reset_schedule(
             };
             (kind, Timing { calc, emit })
         })
-        .collect()
+        .collect())
 }
 
 /// A series `S(anchor, cycle, MD)` without the maturity element (shared
@@ -151,20 +154,25 @@ fn fixing_schedule(
     c: &Conventions,
     anchor: Option<NaiveDateTime>,
     cycle: Option<&Cycle>,
-) -> Vec<Timing> {
+) -> Result<Vec<Timing>, EngineError> {
     let (Some(anchor), Some(cycle)) = (anchor.map(normalize_timestamp), cycle) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    stub_series(anchor, cycle, c.maturity, c.eomc, c.bdc, c.cal)
-        .into_iter()
-        .filter(|(calc, _)| *calc != c.maturity)
-        .map(|(calc, emit)| Timing { calc, emit })
-        .collect()
+    Ok(
+        stub_series(anchor, cycle, c.maturity, c.eomc, c.bdc, c.cal)?
+            .into_iter()
+            .filter(|(calc, _)| *calc != c.maturity)
+            .map(|(calc, emit)| Timing { calc, emit })
+            .collect(),
+    )
 }
 
 /// The `PR` redemption series `S(PRANX, PRCL, MD)` without the maturity
 /// element (the final redemption belongs to `MD`).
-pub(crate) fn principal_redemption_schedule(c: &Conventions, terms: &ContractTerms) -> Vec<Timing> {
+pub(crate) fn principal_redemption_schedule(
+    c: &Conventions,
+    terms: &ContractTerms,
+) -> Result<Vec<Timing>, EngineError> {
     fixing_schedule(
         c,
         terms.cycle_anchor_date_of_principal_redemption,
@@ -177,9 +185,9 @@ pub(crate) fn principal_redemption_schedule(c: &Conventions, terms: &ContractTer
 pub(crate) fn interest_calculation_base_schedule(
     c: &Conventions,
     terms: &ContractTerms,
-) -> Vec<Timing> {
+) -> Result<Vec<Timing>, EngineError> {
     if terms.interest_calculation_base != Some(InterestCalculationBase::Ntl) {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     fixing_schedule(
         c,
@@ -191,9 +199,12 @@ pub(crate) fn interest_calculation_base_schedule(
 /// The `SC` scaling index series: defined only when the scaling effect
 /// scales the notional or the interest, from `SCANX` with cycle `SCCL`,
 /// without the maturity element.
-pub(crate) fn scaling_index_schedule(c: &Conventions, terms: &ContractTerms) -> Vec<Timing> {
+pub(crate) fn scaling_index_schedule(
+    c: &Conventions,
+    terms: &ContractTerms,
+) -> Result<Vec<Timing>, EngineError> {
     if !scales_notional(terms.scaling_effect) && !scales_interest(terms.scaling_effect) {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     fixing_schedule(
         c,
@@ -346,7 +357,7 @@ pub(crate) fn progressed_accrued(
     ) else {
         return Ok(None);
     };
-    let previous = stub_series(anchor, cycle, c.maturity, c.eomc, c.bdc, c.cal)
+    let previous = stub_series(anchor, cycle, c.maturity, c.eomc, c.bdc, c.cal)?
         .into_iter()
         .map(|(calc, _)| calc)
         .filter(|t| *t < c.t0)
@@ -413,7 +424,7 @@ mod tests {
     #[test]
     fn interest_schedule_runs_from_the_anchor_to_maturity() {
         let c = conventions("2013-01-01T00:00:00", "2014-01-01T00:00:00");
-        let schedule = interest_schedule(&c, &quarterly_loan(json!({})));
+        let schedule = interest_schedule(&c, &quarterly_loan(json!({}))).unwrap();
         assert!(schedule.capitalization.is_empty());
         assert_eq!(
             emits(&schedule.payment),
@@ -430,7 +441,7 @@ mod tests {
     fn capitalization_dates_are_removed_from_the_payment_series() {
         let c = conventions("2013-01-01T00:00:00", "2014-01-01T00:00:00");
         let terms = quarterly_loan(json!({ "capitalizationEndDate": "2013-07-01T00:00:00" }));
-        let schedule = interest_schedule(&c, &terms);
+        let schedule = interest_schedule(&c, &terms).unwrap();
         assert_eq!(
             emits(&schedule.capitalization),
             vec![t("2013-04-01T00:00:00"), t("2013-07-01T00:00:00")]
@@ -445,7 +456,7 @@ mod tests {
     fn capitalization_end_at_or_after_maturity_capitalizes_nothing() {
         let c = conventions("2013-01-01T00:00:00", "2014-01-01T00:00:00");
         let terms = quarterly_loan(json!({ "capitalizationEndDate": "2014-01-01T00:00:00" }));
-        let schedule = interest_schedule(&c, &terms);
+        let schedule = interest_schedule(&c, &terms).unwrap();
         assert!(schedule.capitalization.is_empty());
         assert_eq!(schedule.payment.len(), 4);
     }
@@ -455,7 +466,7 @@ mod tests {
         let c = conventions("2013-01-01T00:00:00", "2014-01-01T00:00:00");
         let mut terms = quarterly_loan(json!({}));
         terms.cycle_of_interest_payment = None;
-        let schedule = interest_schedule(&c, &terms);
+        let schedule = interest_schedule(&c, &terms).unwrap();
         assert!(schedule.payment.is_empty() && schedule.capitalization.is_empty());
     }
 
@@ -467,7 +478,7 @@ mod tests {
             "cycleOfRateReset": "P3ML0",
             "nextResetRate": "0.07"
         }));
-        let resets = rate_reset_schedule(&c, &terms);
+        let resets = rate_reset_schedule(&c, &terms).unwrap();
         let kinds: Vec<(RateReset, NaiveDateTime)> = resets
             .iter()
             .map(|(kind, timing)| (*kind, timing.emit))
@@ -491,10 +502,12 @@ mod tests {
             "cycleAnchorDateOfRateReset": "2013-04-01T00:00:00",
             "cycleOfRateReset": "P3ML0"
         }));
-        let resets = rate_reset_schedule(&c, &terms);
+        let resets = rate_reset_schedule(&c, &terms).unwrap();
         assert_eq!(resets.len(), 3);
         assert!(resets.iter().all(|(kind, _)| *kind == RateReset::Variable));
-        assert!(rate_reset_schedule(&c, &quarterly_loan(json!({}))).is_empty());
+        assert!(rate_reset_schedule(&c, &quarterly_loan(json!({})))
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -509,14 +522,13 @@ mod tests {
         let mut nt = base;
         nt["interestCalculationBase"] = json!("NT");
         assert_eq!(
-            emits(&interest_calculation_base_schedule(
-                &c,
-                &quarterly_loan(ntl)
-            )),
+            emits(&interest_calculation_base_schedule(&c, &quarterly_loan(ntl)).unwrap()),
             // The maturity element belongs to MD.
             vec![t("2013-07-01T00:00:00")]
         );
-        assert!(interest_calculation_base_schedule(&c, &quarterly_loan(nt)).is_empty());
+        assert!(interest_calculation_base_schedule(&c, &quarterly_loan(nt))
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -531,12 +543,14 @@ mod tests {
         };
         for effect in ["INO", "ONO", "IOO"] {
             assert_eq!(
-                scaling_index_schedule(&c, &scaled(effect)).len(),
+                scaling_index_schedule(&c, &scaled(effect)).unwrap().len(),
                 3,
                 "{effect}"
             );
         }
-        assert!(scaling_index_schedule(&c, &scaled("OOO")).is_empty());
+        assert!(scaling_index_schedule(&c, &scaled("OOO"))
+            .unwrap()
+            .is_empty());
         assert!(scales_notional(Some(ScalingEffect::Notional)));
         assert!(!scales_notional(Some(ScalingEffect::Interest)));
         assert!(scales_interest(Some(ScalingEffect::InterestAndNotional)));

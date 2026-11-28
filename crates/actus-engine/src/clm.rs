@@ -129,7 +129,7 @@ impl ContractEngine for ClmEngine {
         };
         let mut settlement: Option<Decimal> = None;
         let mut events = Vec::new();
-        for slot in ctx.schedule(terms) {
+        for slot in ctx.schedule(terms)? {
             if !ctx.observed(slot.emit) {
                 continue;
             }
@@ -225,7 +225,7 @@ impl Context {
 
     /// Builds the CLM event skeleton in deterministic (calculation time,
     /// sequence rank) order.
-    fn schedule(&self, terms: &ContractTerms) -> Vec<Slot> {
+    fn schedule(&self, terms: &ContractTerms) -> Result<Vec<Slot>, EngineError> {
         let mut slots = Vec::new();
         if !self.progressed {
             let (calc, emit) = self.point(self.ied);
@@ -236,8 +236,8 @@ impl Context {
                 obs: self.ied,
             });
         }
-        self.interest_slots(terms, &mut slots);
-        self.rate_reset_slots(terms, &mut slots);
+        self.interest_slots(terms, &mut slots)?;
+        self.rate_reset_slots(terms, &mut slots)?;
         match self.maturity {
             Some(maturity) => {
                 let calc = if calculate_first(self.bdc) {
@@ -280,7 +280,7 @@ impl Context {
             }
         }
         slots.sort_by_key(|slot| (slot.calc, slot.kind.priority()));
-        slots
+        Ok(slots)
     }
 
     /// The `IPCI` capitalization series (techspec CLM schedule row IPCI).
@@ -293,10 +293,14 @@ impl Context {
     /// analysis window when at or before the status date (clm01, clm02),
     /// while an `IED` after the status date carries a no-op `IPCI` at the
     /// exchange date (clm12).
-    fn interest_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
+    fn interest_slots(
+        &self,
+        terms: &ContractTerms,
+        slots: &mut Vec<Slot>,
+    ) -> Result<(), EngineError> {
         let cycle = match terms.cycle_of_interest_payment.as_ref() {
             Some(cycle) => cycle,
-            None => return,
+            None => return Ok(()),
         };
         let anchor = match terms
             .cycle_anchor_date_of_interest_payment
@@ -305,7 +309,7 @@ impl Context {
             Some(anchor) => anchor,
             None => self.ied,
         };
-        for roll in self.roll_series(anchor, cycle) {
+        for roll in self.roll_series(anchor, cycle)? {
             let (calc, emit) = self.point(roll);
             if self.terminal_cut(calc) {
                 continue;
@@ -317,6 +321,7 @@ impl Context {
                 obs: roll,
             });
         }
+        Ok(())
     }
 
     /// The `RR` rate reset series (techspec CLM schedule row RR, "Same as
@@ -327,7 +332,11 @@ impl Context {
     /// it degenerates to the single anchor point (testbed clm15). Rate
     /// observations read the market object at the unshifted roll date even
     /// when the event calculates on the shifted date (clm10).
-    fn rate_reset_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
+    fn rate_reset_slots(
+        &self,
+        terms: &ContractTerms,
+        slots: &mut Vec<Slot>,
+    ) -> Result<(), EngineError> {
         let anchor = match (
             terms
                 .cycle_anchor_date_of_rate_reset
@@ -336,13 +345,13 @@ impl Context {
         ) {
             (Some(anchor), _) => anchor,
             (None, Some(_)) => self.ied,
-            (None, None) => return,
+            (None, None) => return Ok(()),
         };
         let rolls = match terms.cycle_of_rate_reset.as_ref() {
             Some(cycle) => {
                 let termination = self.rolling_end();
                 let mut shifted =
-                    stub_series(anchor, cycle, termination, self.eomc, self.bdc, self.cal);
+                    stub_series(anchor, cycle, termination, self.eomc, self.bdc, self.cal)?;
                 let mut raw = stub_series(
                     anchor,
                     cycle,
@@ -350,7 +359,7 @@ impl Context {
                     self.eomc,
                     BusinessDayConvention::Nos,
                     self.cal,
-                );
+                )?;
                 if shifted.last().map(|(_, emit)| *emit) == Some(termination) {
                     shifted.pop();
                     raw.pop();
@@ -385,6 +394,7 @@ impl Context {
             }
             slots.push(slot);
         }
+        Ok(())
     }
 
     /// The terminal date the rolling series stop before: the maturity for
@@ -402,13 +412,17 @@ impl Context {
 
     /// Unrolls the anchor element plus the cycle rolls strictly before the
     /// rolling end, without stub correction.
-    fn roll_series(&self, anchor: NaiveDateTime, cycle: &Cycle) -> Vec<NaiveDateTime> {
+    fn roll_series(
+        &self,
+        anchor: NaiveDateTime,
+        cycle: &Cycle,
+    ) -> Result<Vec<NaiveDateTime>, EngineError> {
         let end = self.rolling_end();
         let mut rolls = vec![anchor];
         let mut index: u64 = 0;
         loop {
             index += 1;
-            let next = cycle_step(anchor, index, cycle, self.eomc);
+            let next = cycle_step(anchor, index, cycle, self.eomc)?;
             if next >= end {
                 break;
             }
@@ -417,7 +431,7 @@ impl Context {
                 break;
             }
         }
-        rolls
+        Ok(rolls)
     }
 
     /// Resolves the (calculation, emission) pair of one roll date: `CS*`
@@ -578,7 +592,7 @@ fn notice_period(
             let eomc = terms
                 .end_of_month_convention
                 .unwrap_or(EndOfMonthConvention::Sd);
-            Ok(cycle_step(exercise, 1, &cycle, eomc))
+            Ok(cycle_step(exercise, 1, &cycle, eomc)?)
         }
         _ => Err(EngineError::InvalidTransition(format!(
             "invalid xDayNotice period: {raw}"

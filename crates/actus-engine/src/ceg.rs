@@ -229,7 +229,7 @@ fn fee_schedule(
 
     let mut schedule = Vec::new();
     let mut previous = anchor;
-    for (calc, emit) in stub_series(anchor, cycle, maturity, eomc, bdc, cal) {
+    for (calc, emit) in stub_series(anchor, cycle, maturity, eomc, bdc, cal)? {
         let notional = covered_exposure(covered, emit, terms.guaranteed_exposure, risk)?;
         let year_fraction = day_count_fraction(previous, calc, dcc)?;
         let fee = match basis {

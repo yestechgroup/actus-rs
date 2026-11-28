@@ -182,7 +182,7 @@ impl ContractEngine for LamEngine {
         fixed_income::evaluate_schedule(
             ctx.ied,
             ctx.t0,
-            ctx.schedule(terms),
+            ctx.schedule(terms)?,
             terms,
             || progressed_initial(&ctx, terms),
             || initial_state(&ctx, terms),
@@ -262,13 +262,13 @@ impl Context {
                         .to_string(),
                 ))?;
                 let steps = redemptions.saturating_sub(1);
-                normalize_timestamp(cycle_step(pranx, steps, prcl, eomc))
+                normalize_timestamp(cycle_step(pranx, steps, prcl, eomc)?)
             }
         };
         let next_principal_redemption = match terms.next_principal_redemption_payment {
             Some(prnxt) => prnxt,
             None => {
-                let elements = stub_series(pranx, prcl, maturity, eomc, bdc, cal).len();
+                let elements = stub_series(pranx, prcl, maturity, eomc, bdc, cal)?.len();
                 if elements == 0 {
                     return Err(EngineError::InvalidTransition(
                         "principal redemption schedule is empty".to_string(),
@@ -293,7 +293,7 @@ impl Context {
 
     /// Builds the LAM event skeleton in deterministic (calculation time,
     /// dictionary sequence) order.
-    fn schedule(&self, terms: &ContractTerms) -> Vec<Slot> {
+    fn schedule(&self, terms: &ContractTerms) -> Result<Vec<Slot>, EngineError> {
         let mut slots = vec![
             Slot {
                 kind: Kind::InitialExchange,
@@ -320,24 +320,29 @@ impl Context {
                 emit: td,
             });
         }
-        self.principal_redemption_slots(terms, &mut slots);
+        self.principal_redemption_slots(terms, &mut slots)?;
         if terms.nominal_interest_rate.is_some() {
-            self.interest_slots(terms, &mut slots);
-            self.rate_reset_slots(terms, &mut slots);
+            self.interest_slots(terms, &mut slots)?;
+            self.rate_reset_slots(terms, &mut slots)?;
         }
-        self.scaling_index_slots(terms, &mut slots);
-        self.interest_calculation_base_slots(terms, &mut slots);
+        self.scaling_index_slots(terms, &mut slots)?;
+        self.interest_calculation_base_slots(terms, &mut slots)?;
         slots.sort_by_key(|slot| (slot.calc, slot.kind.priority()));
-        slots
+        Ok(slots)
     }
 
     /// The `PR` principal redemption series (techspec LAM schedule row PR):
     /// `S(PRANX, PRCL, MD)` without the maturity element, which the
     /// maturity event supersedes.
-    fn principal_redemption_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
-        for timing in principal_redemption_schedule(&self.conventions(), terms) {
+    fn principal_redemption_slots(
+        &self,
+        terms: &ContractTerms,
+        slots: &mut Vec<Slot>,
+    ) -> Result<(), EngineError> {
+        for timing in principal_redemption_schedule(&self.conventions(), terms)? {
             slots.push(Slot::timed(Kind::PrincipalRedemption, timing));
         }
+        Ok(())
     }
 
     /// The `IPCI` and `IP` series (techspec LAM schedule rows IPCI and IP).
@@ -351,14 +356,19 @@ impl Context {
     /// conventions the emission dates of the two series diverge
     /// independently, so only the unshifted dates identify the shared
     /// schedule points.
-    fn interest_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
-        let schedule = interest_schedule(&self.conventions(), terms);
+    fn interest_slots(
+        &self,
+        terms: &ContractTerms,
+        slots: &mut Vec<Slot>,
+    ) -> Result<(), EngineError> {
+        let schedule = interest_schedule(&self.conventions(), terms)?;
         for timing in schedule.capitalization {
             slots.push(Slot::timed(Kind::InterestCapitalization, timing));
         }
         for timing in schedule.payment {
             slots.push(Slot::timed(Kind::InterestPayment, timing));
         }
+        Ok(())
     }
 
     /// The `RR`/`RRF` rate reset series (techspec LAM schedule row RR).
@@ -367,27 +377,42 @@ impl Context {
     /// element; with `RRNXT` set, the first schedule point after the status
     /// date becomes a fixed reset `RRF` applying `RRNXT` instead of a market
     /// observation (lam14).
-    fn rate_reset_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
-        for (reset, timing) in rate_reset_schedule(&self.conventions(), terms) {
+    fn rate_reset_slots(
+        &self,
+        terms: &ContractTerms,
+        slots: &mut Vec<Slot>,
+    ) -> Result<(), EngineError> {
+        for (reset, timing) in rate_reset_schedule(&self.conventions(), terms)? {
             slots.push(Slot::timed(rate_reset_kind(reset), timing));
         }
+        Ok(())
     }
 
     /// The `SC` scaling index series (techspec LAM schedule row SC):
     /// `S(SCANX, SCCL, MD)` without the maturity element.
-    fn scaling_index_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
-        for timing in scaling_index_schedule(&self.conventions(), terms) {
+    fn scaling_index_slots(
+        &self,
+        terms: &ContractTerms,
+        slots: &mut Vec<Slot>,
+    ) -> Result<(), EngineError> {
+        for timing in scaling_index_schedule(&self.conventions(), terms)? {
             slots.push(Slot::timed(Kind::ScalingIndexFixing, timing));
         }
+        Ok(())
     }
 
     /// The `IPCB` interest calculation base fixing series (techspec LAM
     /// schedule row IPCB): defined only for `IPCB = NTL`, unrolled from
     /// `IPCBANX` to maturity without the maturity element.
-    fn interest_calculation_base_slots(&self, terms: &ContractTerms, slots: &mut Vec<Slot>) {
-        for timing in interest_calculation_base_schedule(&self.conventions(), terms) {
+    fn interest_calculation_base_slots(
+        &self,
+        terms: &ContractTerms,
+        slots: &mut Vec<Slot>,
+    ) -> Result<(), EngineError> {
+        for timing in interest_calculation_base_schedule(&self.conventions(), terms)? {
             slots.push(Slot::timed(Kind::InterestCalculationBaseFixing, timing));
         }
+        Ok(())
     }
 
     /// Applies the state transition and payoff function of one slot
