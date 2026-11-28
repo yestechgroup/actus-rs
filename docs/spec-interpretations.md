@@ -61,6 +61,10 @@ payoff is not the mirror image of the `RPA` one.
 
 ## SI-002: LAX `INC` segments are principal increases, reported as `PD`
 
+> **Superseded by SI-011.** The LAX testbed, vendored after this entry,
+> expects `PI` for these events (lax16–lax18). The amounts and the
+> direction decided here stand; only the label changed.
+
 **Section.** LAX schedule (techspec l. 1298, `PI` row) and LAX functions
 table (l. 1402):
 
@@ -416,3 +420,30 @@ untouched; the `ad0` gate pins the case as failing (0/1).
   fixed-income engines do not yet replay custom `AD` dates at all (only CSH
   does). That gap is filed separately; it is a feature for user-supplied
   analysis dates, not something this case can decide.
+
+---
+
+## SI-011: LAX `INC` segments are reported as `PI` (supersedes SI-002)
+
+**Section.** LAX schedule and functions, the `PI` rows (techspec l. 1298,
+l. 1402); the event type extensions of SI-005.
+
+**Question.** SI-002 reported the principal increases of `INC` segments as
+the dictionary's `PD`, because the v1.4 event vocabulary has no `PI` and
+"no official testbed covers LAX `INC` segments". The LAX testbed vendored
+since does.
+
+**Readings.** `PD` (SI-002) or `PI` (the techspec, now an `EventType`
+extension under SI-005).
+
+**Chosen.** `PI`. A testbed outranks the earlier decision, which rested on
+weaker evidence (`CONTRIBUTING.md`). SI-002's amounts and directions are
+unchanged: `POF_PI = R · (−1) · Nsc · Prnxt`, `Nt⁺ = Nt⁻ + R · Prnxt`,
+without actus-core's `PR` cap.
+
+**Evidence.** lax16, lax17 and lax18 expect 18 `PI` events. With `PD` all
+three fail at their first increase; with `PI` they pass (LAX 15/18 → 18/18).
+Their payoffs and notionals match SI-002's amounts, so the uncapped
+techspec `PI` row is confirmed too (no case draws more than the
+outstanding notional, so the cap question itself stays undecided by
+testbed). This settles the label question SI-002 left open for #37.

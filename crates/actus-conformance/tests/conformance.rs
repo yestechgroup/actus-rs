@@ -407,11 +407,7 @@ fn ump_testbed_gate() {
 
 #[test]
 fn lax_testbed_gate() {
-    let passing = [
-        "lax01", "lax02", "lax03", "lax04", "lax05", "lax06", "lax07", "lax08", "lax09", "lax10",
-        "lax11", "lax12", "lax13", "lax14", "lax15",
-    ];
-    gate("lax", 18, 269, &passing);
+    gate_complete("lax", 18, 269);
 }
 
 #[test]
