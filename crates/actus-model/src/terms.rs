@@ -130,6 +130,7 @@ pub struct ContractTerms {
     #[serde(
         rename = "arrayCycleOfInterestPayment",
         default,
+        deserialize_with = "crate::serde_helpers::one_or_many_option::deserialize",
         skip_serializing_if = "Option::is_none"
     )]
     pub array_cycle_of_interest_payment: Option<Vec<Cycle>>,
@@ -163,6 +164,7 @@ pub struct ContractTerms {
     #[serde(
         rename = "arrayCycleOfPrincipalRedemption",
         default,
+        deserialize_with = "crate::serde_helpers::one_or_many_option::deserialize",
         skip_serializing_if = "Option::is_none"
     )]
     pub array_cycle_of_principal_redemption: Option<Vec<Cycle>>,
@@ -183,6 +185,7 @@ pub struct ContractTerms {
     #[serde(
         rename = "arrayIncreaseDecrease",
         default,
+        deserialize_with = "crate::serde_helpers::one_or_many_option::deserialize",
         skip_serializing_if = "Option::is_none"
     )]
     pub array_increase_decrease: Option<Vec<ArrayIncDec>>,
@@ -216,6 +219,7 @@ pub struct ContractTerms {
     #[serde(
         rename = "arrayCycleOfRateReset",
         default,
+        deserialize_with = "crate::serde_helpers::one_or_many_option::deserialize",
         skip_serializing_if = "Option::is_none"
     )]
     pub array_cycle_of_rate_reset: Option<Vec<Cycle>>,
@@ -1429,6 +1433,87 @@ mod tests {
             .filter(|(_, set)| *set)
             .collect();
         assert_eq!(presence.len(), 11);
+    }
+
+    /// The LAX testbed writes one-segment arrays as bare scalars (lax01..11,
+    /// lax16..18); each reads as a one-element array and serializes back
+    /// as an array.
+    #[test]
+    fn bare_scalars_are_one_element_arrays() {
+        let terms: ContractTerms = serde_json::from_value(serde_json::json!({
+            "contractType": "LAX",
+            "arrayCycleAnchorDateOfInterestPayment": "2021-01-01T00:00:00",
+            "arrayCycleOfInterestPayment": "P1YL1",
+            "arrayCycleAnchorDateOfPrincipalRedemption": "2021-01-01T00:00:00",
+            "arrayCycleOfPrincipalRedemption": "P1YL1",
+            "arrayNextPrincipalRedemptionPayment": 20,
+            "arrayIncreaseDecrease": "DEC",
+            "arrayCycleAnchorDateOfRateReset": "2022-01-01",
+            "arrayCycleOfRateReset": "P1YL0",
+            "arrayRate": "0.06"
+        }))
+        .expect("singleton arrays parse");
+        let t = |s: &str| crate::serde_helpers::parse_timestamp(s).unwrap();
+        assert_eq!(
+            terms.array_cycle_anchor_date_of_interest_payment,
+            Some(vec![t("2021-01-01T00:00:00")])
+        );
+        assert_eq!(
+            terms.array_cycle_of_interest_payment,
+            Some(vec![Cycle::parse("P1YL1").unwrap()])
+        );
+        assert_eq!(
+            terms.array_cycle_of_principal_redemption,
+            Some(vec![Cycle::parse("P1YL1").unwrap()])
+        );
+        assert_eq!(
+            terms.array_next_principal_redemption_payment,
+            Some(vec![Decimal::from(20)])
+        );
+        assert_eq!(
+            terms.array_increase_decrease,
+            Some(vec![crate::enums::ArrayIncDec::Dec])
+        );
+        assert_eq!(
+            terms.array_cycle_anchor_date_of_rate_reset,
+            Some(vec![t("2022-01-01")])
+        );
+        assert_eq!(
+            terms.array_cycle_of_rate_reset,
+            Some(vec![Cycle::parse("P1YL0").unwrap()])
+        );
+        assert_eq!(terms.array_rate, Some(vec![Decimal::new(6, 2)]));
+        let float: ContractTerms = serde_json::from_value(serde_json::json!({
+            "contractType": "LAX",
+            "arrayNextPrincipalRedemptionPayment": 2.5
+        }))
+        .expect("float singleton");
+        assert_eq!(
+            float.array_next_principal_redemption_payment,
+            Some(vec![Decimal::new(25, 1)])
+        );
+        let wire = serde_json::to_value(&terms).expect("wire");
+        assert_eq!(
+            wire["arrayCycleOfPrincipalRedemption"],
+            serde_json::json!(["P1YL1"])
+        );
+        assert_eq!(
+            wire["arrayNextPrincipalRedemptionPayment"],
+            serde_json::json!(["20"])
+        );
+        for bad in [
+            serde_json::json!({"contractType": "LAX", "arrayCycleOfInterestPayment": "P1X"}),
+            serde_json::json!({"contractType": "LAX", "arrayIncreaseDecrease": "UP"}),
+            serde_json::json!({"contractType": "LAX", "arrayRate": "x"}),
+            serde_json::json!({"contractType": "LAX", "arrayRate": true}),
+            serde_json::json!({"contractType": "LAX", "arrayCycleAnchorDateOfRateReset": "nope"}),
+            serde_json::json!({"contractType": "LAX", "arrayIncreaseDecrease": 3}),
+        ] {
+            assert!(
+                serde_json::from_value::<ContractTerms>(bad.clone()).is_err(),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

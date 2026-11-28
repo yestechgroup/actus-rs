@@ -287,9 +287,15 @@ fn timestamp_vec_option_parses_each_element() {
         .to_string();
     assert!(err.contains("nope"), "{err}");
     assert!(wire(json!({"timestamps": [20130101]})).is_err());
-    let err = wire(json!({"timestamps": "2013-01-01"}))
-        .unwrap_err()
-        .to_string();
+    // A bare timestamp is a one-element array (the LAX testbed encoding).
+    assert_eq!(
+        wire(json!({"timestamps": "2013-01-01"}))
+            .unwrap()
+            .timestamps,
+        Some(vec![ts(2013, 1, 1, 0, 0, 0)])
+    );
+    assert!(wire(json!({"timestamps": "nope"})).is_err());
+    let err = wire(json!({"timestamps": true})).unwrap_err().to_string();
     assert!(err.contains("an array of ACTUS timestamps"), "{err}");
 }
 
@@ -306,7 +312,21 @@ fn decimal_vec_option_parses_mixed_numeric_elements() {
         .unwrap_err()
         .to_string();
     assert!(err.contains("bad"), "{err}");
-    let err = wire(json!({"decimals": 0.01})).unwrap_err().to_string();
+    // A bare decimal is a one-element array (the LAX testbed encoding).
+    assert_eq!(
+        wire(json!({"decimals": 0.01})).unwrap().decimals,
+        Some(vec![d("0.01")])
+    );
+    assert_eq!(
+        wire(json!({"decimals": 20})).unwrap().decimals,
+        Some(vec![d("20")])
+    );
+    assert_eq!(
+        wire(json!({"decimals": "20"})).unwrap().decimals,
+        Some(vec![d("20")])
+    );
+    assert!(wire(json!({"decimals": "bad"})).is_err());
+    let err = wire(json!({"decimals": true})).unwrap_err().to_string();
     assert!(err.contains("an array of ACTUS decimals"), "{err}");
 }
 
