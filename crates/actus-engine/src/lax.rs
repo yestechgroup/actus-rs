@@ -128,7 +128,10 @@ enum Kind {
     InterestCapitalization,
     InterestCalculationBaseFixing,
     RateReset,
+    /// An array rate reset of a variable segment (`ARFIXVAR_i = V`): `RR`.
     ArrayRateReset,
+    /// An array rate reset of a fixed segment (`ARFIXVAR_i = F`): `RRF`.
+    ArrayRateResetFixed,
     RateResetFixed,
     ScalingIndexFixing,
     Purchase,
@@ -147,7 +150,7 @@ impl Kind {
             Kind::InterestCapitalization => EventType::InterestCapitalization,
             Kind::InterestCalculationBaseFixing => EventType::InterestCalculationBaseFixing,
             Kind::RateReset | Kind::ArrayRateReset => EventType::RateResetVariable,
-            Kind::RateResetFixed => EventType::RateResetFixed,
+            Kind::RateResetFixed | Kind::ArrayRateResetFixed => EventType::RateResetFixed,
             Kind::ScalingIndexFixing => EventType::ScalingIndexFixing,
             Kind::Purchase => EventType::Purchase,
             Kind::Termination => EventType::Termination,
@@ -604,12 +607,13 @@ impl Context {
                 if calc > self.maturity {
                     continue;
                 }
-                slots.push(Slot::in_segment(
-                    Kind::ArrayRateReset,
-                    calc,
-                    emit,
-                    Self::segment_of(anchors, unshifted),
-                ));
+                let segment = Self::segment_of(anchors, unshifted);
+                let kind = if self.segment_is_variable(terms, segment) {
+                    Kind::ArrayRateReset
+                } else {
+                    Kind::ArrayRateResetFixed
+                };
+                slots.push(Slot::in_segment(kind, calc, emit, segment));
             }
             return Ok(());
         }
@@ -671,6 +675,18 @@ impl Context {
             }
             _ => false,
         }
+    }
+
+    /// Whether rate segment `segment` is variable (`ARFIXVAR_i = V`; the
+    /// element is clamped to the last one, and an absent array reads as
+    /// `F`). The techspec LAX schedule gives the `V` segments `RR` and the
+    /// `F` segments `RRF` events (#44).
+    fn segment_is_variable(&self, terms: &ContractTerms, segment: usize) -> bool {
+        terms
+            .array_fixed_variable
+            .as_deref()
+            .and_then(|segments| segments.get(segment).or_else(|| segments.last()))
+            .is_some_and(|fv| *fv == ArrayFixVar::Variable)
     }
 
     /// The `ARRATE` value of one segment, clamped to the last element.
@@ -769,44 +785,35 @@ impl Context {
                 Decimal::ZERO
             }
             Kind::ArrayRateReset => {
+                // A variable segment: the segment rate is the spread on top
+                // of the observed reference rate (the applicable `RRSP`).
                 state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
-                // Phase-1 reading of the array: its first element applies to
-                // every segment, as the scalar did before #44 (per-segment
-                // selection follows with the LAX testbed).
-                match terms
-                    .array_fixed_variable
-                    .as_ref()
-                    .and_then(|v| v.first().copied())
-                {
-                    Some(ArrayFixVar::Variable) => {
-                        // The segment rate is the spread on top of the
-                        // reference rate (the applicable `RRSP`).
-                        let code = terms
-                            .market_object_code_of_rate_reset
-                            .as_deref()
-                            .ok_or(EngineError::MissingAttribute("marketObjectCodeOfRateReset"))?;
-                        let observed =
-                            risk.rate(code, slot.calc)
-                                .ok_or(EngineError::RiskFactorMissing {
-                                    code: code.to_string(),
-                                    at: slot.calc.to_string(),
-                                })?;
-                        let multiplier = terms.rate_multiplier.unwrap_or(Decimal::ONE);
-                        let spread = self
-                            .array_rate(terms, slot.segment)
-                            .unwrap_or(terms.rate_spread.unwrap_or(Decimal::ZERO));
-                        state.nominal_interest_rate = (ck(observed) * multiplier + spread).get()?;
-                    }
-                    // `F` and the attribute default: the segment rate is the
-                    // new fixed nominal interest rate.
-                    _ => {
-                        let rate = self
-                            .array_rate(terms, slot.segment)
-                            .or(terms.next_reset_rate)
-                            .ok_or(EngineError::MissingAttribute("arrayRate"))?;
-                        state.nominal_interest_rate = rate;
-                    }
-                }
+                let code = terms
+                    .market_object_code_of_rate_reset
+                    .as_deref()
+                    .ok_or(EngineError::MissingAttribute("marketObjectCodeOfRateReset"))?;
+                let observed =
+                    risk.rate(code, slot.calc)
+                        .ok_or(EngineError::RiskFactorMissing {
+                            code: code.to_string(),
+                            at: slot.calc.to_string(),
+                        })?;
+                let multiplier = terms.rate_multiplier.unwrap_or(Decimal::ONE);
+                let spread = self
+                    .array_rate(terms, slot.segment)
+                    .unwrap_or(terms.rate_spread.unwrap_or(Decimal::ZERO));
+                state.nominal_interest_rate = (ck(observed) * multiplier + spread).get()?;
+                Decimal::ZERO
+            }
+            Kind::ArrayRateResetFixed => {
+                // A fixed segment: the segment rate is the new fixed nominal
+                // interest rate.
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
+                let rate = self
+                    .array_rate(terms, slot.segment)
+                    .or(terms.next_reset_rate)
+                    .ok_or(EngineError::MissingAttribute("arrayRate"))?;
+                state.nominal_interest_rate = rate;
                 Decimal::ZERO
             }
             Kind::RateReset => {
@@ -1305,6 +1312,7 @@ mod tests {
     /// before the 2026-07-01 anchor) resets at 0.05 on 2026-01-01, 03-01,
     /// 05-01, segment 1 resets at 0.09 on 2026-07-01 (the maturity element
     /// of the schedule belongs to `MD`).
+    /// The `F` segments report fixed resets, `RRF` (#44).
     #[test]
     fn array_rate_reset_applies_the_segment_rate() {
         let terms = terms(json!({
@@ -1333,7 +1341,7 @@ mod tests {
             .expect("events");
         let resets: Vec<&ContractEvent> = events
             .iter()
-            .filter(|e| e.event_type == EventType::RateResetVariable)
+            .filter(|e| e.event_type == EventType::RateResetFixed)
             .collect();
         assert_eq!(resets.len(), 4);
         assert_eq!(resets[0].time, t("2026-01-01T00:00:00"));
@@ -1593,5 +1601,47 @@ mod tests {
             (EventType::Maturity, t("2025-01-01T00:00:00"))
         );
         assert_eq!(last.payoff, dec!(20));
+    }
+
+    /// #44, lax17/lax18: `ARFIXVAR` selects per segment (techspec LAX
+    /// schedule: `RRF` for the segments with `ARFIXVAR_i = 'F'`, `RR` for
+    /// `'V'`). An `F` segment sets the rate to `ARRATE_i` (`RRF`); a `V`
+    /// segment observes the market and adds `ARRATE_i` as the spread (`RR`).
+    #[test]
+    fn fixed_and_variable_array_segments_reset_differently() {
+        let terms = array_rate_contract(json!({
+            "arrayFixedVariable": ["F", "V"],
+            "arrayRate": ["0.05", "0.01"],
+            "marketObjectCodeOfRateReset": "R"
+        }));
+        let risk = StateProvider::new().with_rate("R", t("2026-07-01T00:00:00"), dec!(0.04));
+        let events = LaxEngine.evaluate(&terms, &risk).expect("events");
+        let resets: Vec<(EventType, NaiveDateTime, Decimal)> = events
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.event_type,
+                    EventType::RateResetFixed | EventType::RateResetVariable
+                )
+            })
+            .map(|e| (e.event_type, e.time, e.state.nominal_interest_rate))
+            .collect();
+        assert_eq!(
+            resets[0],
+            (
+                EventType::RateResetFixed,
+                t("2026-01-01T00:00:00"),
+                dec!(0.05)
+            )
+        );
+        assert_eq!(
+            resets[3],
+            (
+                EventType::RateResetVariable,
+                t("2026-07-01T00:00:00"),
+                dec!(0.05)
+            )
+        );
+        assert_eq!(resets.len(), 4);
     }
 }
