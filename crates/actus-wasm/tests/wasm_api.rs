@@ -353,3 +353,55 @@ fn former_panics_are_reported_as_errors() {
         assert!(error.contains(expected), "{name}: {error}");
     }
 }
+
+/// The testbed case collateral02 through the JSON API: the credit event names
+/// the covered bond (`contractId`), so the guarantee exercises and settles
+/// the 1M exposure (expected results from vendor/actus/tests). The scenario
+/// field used to be dropped silently, leaving the CEC to mature untriggered.
+#[test]
+fn credit_events_name_the_covered_contract() {
+    let terms = r#"{"contractType": "CEC", "contractID": "collateral02", "contractRole": "BUY",
+        "contractStructure": [
+          {"object": {"contractType": "PAM", "contractID": "US91282XYZ01",
+            "statusDate": "2020-01-01T00:00:00", "contractDealDate": "2020-01-01T00:00:00",
+            "currency": "USD", "notionalPrincipal": "1000000",
+            "initialExchangeDate": "2020-01-02T00:00:00", "maturityDate": "2020-12-31T00:00:00",
+            "nominalInterestRate": "0.03", "cycleAnchorDateOfInterestPayment": "2020-02-01T00:00:00",
+            "cycleOfInterestPayment": "P1ML0", "dayCountConvention": "A365",
+            "endOfMonthConvention": "SD", "contractRole": "RPA"},
+           "referenceType": "CNT", "referenceRole": "COVE"},
+          {"object": {"contractType": "COM", "contractID": "GOLD01X12DF3VW",
+            "statusDate": "2020-01-01T00:00:00", "currency": "USD", "contractRole": "RPA",
+            "marketObjectCode": "GOLD", "quantity": "1"},
+           "referenceType": "CNT", "referenceRole": "COVI"}],
+        "currency": "USD", "calendar": "NC", "contractDealDate": "2020-01-01T00:00:00",
+        "statusDate": "2020-01-01T00:00:00", "creditEventTypeCovered": "DF",
+        "settlementPeriod": "P0D"}"#;
+    let scenario = r#"{
+        "unitPrices": {"GOLD": {"2020-09-20T00:00:00": "10000000"}},
+        "creditEvents": [{"time": "2020-09-20T00:00:00", "performance": "DF",
+                          "contractId": "US91282XYZ01"}]
+    }"#;
+    let result: Value = serde_json::from_str(
+        &actus_wasm::dto::evaluate_json_with_risk(terms, scenario).expect("evaluates"),
+    )
+    .unwrap();
+    let events = result["events"].as_array().unwrap();
+    let summary: Vec<(&str, &str, &str)> = events
+        .iter()
+        .map(|e| {
+            (
+                e["eventDate"].as_str().unwrap(),
+                e["eventType"].as_str().unwrap(),
+                e["payoff"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            ("2020-09-20T00:00:00", "XD", "0"),
+            ("2020-09-20T00:00:00", "STD", "1000000"),
+        ]
+    );
+}

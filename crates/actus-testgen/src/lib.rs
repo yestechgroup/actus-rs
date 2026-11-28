@@ -686,11 +686,22 @@ fn scenario(b: &mut Bytes<'_>, terms: &Value) -> Value {
             "payoff": decimal(b),
         }));
     }
+    // Credit events name a child contract (CEG/CEC trigger only on events
+    // naming a covered contract) or nothing.
+    let mut child_ids = vec![Value::Null];
+    if let Some(Value::Array(children)) = terms.get("contractStructure") {
+        for child in children {
+            if let Some(id) = child.get("object").and_then(|o| o.get("contractID")) {
+                child_ids.push(id.clone());
+            }
+        }
+    }
     let mut credit = Vec::new();
     for _ in 0..b.below(3) {
         credit.push(json!({
             "time": timestamp(b, near.as_deref()),
             "performance": *b.pick(&["PF", "DL", "DQ", "DF", "MA", "TE", "XX"]),
+            "contractId": b.pick(&child_ids).clone(),
         }));
     }
     json!({

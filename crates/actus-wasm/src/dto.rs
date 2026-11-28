@@ -197,6 +197,12 @@ pub struct WireCreditEvent {
     /// (`PRF`), e.g. `DF`.
     #[serde(default)]
     pub performance: Option<String>,
+    /// Contract identifier (`CID`) of the contract the credit event
+    /// concerns. The credit enhancement engines (CEG, CEC) only trigger on
+    /// an event that names one of their covered contracts; an event without
+    /// it only matches a covered contract that has no `contractID` either.
+    #[serde(default)]
+    pub contract_id: Option<String>,
 }
 
 /// A [`RiskFactorProvider`] built from a [`Scenario`].
@@ -272,7 +278,7 @@ impl ScenarioProvider {
                 .transpose()?;
             credit_events.push(ObservedCreditEvent {
                 time,
-                contract_id: None,
+                contract_id: event.contract_id.clone(),
                 performance,
             });
         }
