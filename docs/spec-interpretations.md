@@ -340,3 +340,49 @@ at `MD + STP`, valued at `MD`; `TD` role-signed.
   and so do the reference's own STK and COM outputs. The engine keeps the
   signed payoff; the FXOUT gate pins fxout10 as failing (11/12), and the
   vendored file stays untouched.
+
+---
+
+## SI-008: OPTNS and FUTUR settle an exercise amount; the testbeds sign the premium and keep zero exercises
+
+**Section.** "OPTNS: Option" and "FUTUR: Future" (techspec l. 2395–2540):
+schedules `PRD`, `TD`, `MD`, `XD`, `STD`; states `Xd`, `Xa`; `STF_MD`,
+`STF_XD`, `POF_STD = X · R(CNTRL) · Xa`.
+
+**Question.** The engines were written from the paper: OPTNS paid
+`R · NT · max(±(S − OPS1), 0)` at `MD`, required `notionalPrincipal`, read
+the underlying from the contract's own `marketObjectCode` and never used
+`optionStrike2`. FUTUR paid `R · NT · (S − PFUT)` at `MD` and rejected
+`DS = S` as physical delivery (the model's `DeliverySettlement` docs had
+the two tokens swapped). None of that matches the techspec, and no
+testbed case evaluated.
+
+**Chosen.** The techspec event stream, implemented once in
+`crates/actus-engine/src/exercise.rs` (FUTUR is "Same as OPTNS"):
+`PRD`, `MD` (zero), `XD` (zero; fixes `Xa`), and `STD` at
+`Xd + settlementPeriod`, shifted per `BDC`/`CLDR`, paying `R(CNTRL) · Xa`.
+`Xa` is `max(S − OPS1, 0)` for a call, `max(OPS1 − S, 0)` for a put,
+`max(S − OPS1, 0) + max(OPS2 − S, 0)` for a call/put, and `S − PFUT` for a
+future. The underlying `S` is the market object of the `UDL` reference in
+`contractStructure`. There is no notional state. A contract already
+exercised (`XD ≤ t0`) settles its `exerciseAmount`.
+
+Two testbed deviations from the techspec text:
+
+1. **The premium is role-signed.** The techspec writes
+   `POF_PRD_OPTNS = X · (−1) · PPRD`, without `R(CNTRL)`; the testbed pays
+   the seller `+PPRD` (option04: `SEL`, `PRD` +10). *Flip experiment:* the
+   unsigned techspec payoff fails option04–07 and option23, every `SEL`
+   case. `TD` is signed the same way (`R · PTD`); no case decides it.
+2. **A zero exercise is still reported.** By `STF_MD`, `Xd` stays
+   undefined when `x = 0`, so no `XD` or `STD` would follow; the testbed
+   reports `XD` and a zero `STD` (option01: `Xa = 0`). *Flip experiment:*
+   dropping them for `Xa = 0` fails option01, option12 and option16–21.
+
+**Sequence.** The same-day order is the dictionary's `MD, XD, STD`
+(option01–23). The CLM-only rank that puts `XD` before `IP` is now CLM's
+own (`event::call_money_sequence_rank`).
+
+**Out of scope.** American and Bermudan exercise (`OPXT` `A`/`B`), which
+the techspec drives by observed `XD` events, remain an error unless the
+contract carries its exercise date; no testbed case uses them.

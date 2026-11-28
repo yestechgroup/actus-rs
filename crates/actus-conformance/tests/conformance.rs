@@ -339,17 +339,27 @@ fn gate(testbed: &str, cases: usize, events: usize, expected_passing: &[&str]) {
     );
 }
 
+/// Asserts a testbed's totals and that every one of its cases passes.
+fn gate_complete(testbed: &str, cases: usize, events: usize) {
+    let all: Vec<String> = cases::testbed(testbed)
+        .expect("testbed is listed")
+        .load()
+        .expect("testbed loads")
+        .into_iter()
+        .map(|case| case.identifier)
+        .collect();
+    let all: Vec<&str> = all.iter().map(String::as_str).collect();
+    gate(testbed, cases, events, &all);
+}
+
 #[test]
 fn stk_testbed_gate() {
-    let all = [
-        "stk01", "stk02", "stk03", "stk04", "stk05", "stk06", "stk07", "stk08", "stk09", "stk10",
-    ];
-    gate("stk", 10, 78, &all);
+    gate_complete("stk", 10, 78);
 }
 
 #[test]
 fn com_testbed_gate() {
-    gate("com", 4, 6, &["com01", "com02", "com03", "com04"]);
+    gate_complete("com", 4, 6);
 }
 
 #[test]
@@ -377,7 +387,7 @@ fn capfl_testbed_gate() {
 
 #[test]
 fn optns_testbed_gate() {
-    gate("optns", 23, 86, &[]);
+    gate_complete("optns", 23, 86);
 }
 
 #[test]
