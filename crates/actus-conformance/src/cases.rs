@@ -101,9 +101,12 @@ impl ActusTestCase {
 /// stream at the case analysis horizon.
 ///
 /// The testbed `to` field bounds the reported event stream (ann08 reports
-/// only the events up to its horizon); the engine itself evaluates the full
-/// contract lifetime, so the horizon is applied here, mirroring the upstream
-/// reference behaviour. The observed events (`eventsObserved`) are part of
+/// only the events up to its horizon). It is also the analysis horizon
+/// `tmax` of the evaluation environment
+/// ([`RiskFactorProvider::analysis_horizon`]), which bounds open-ended
+/// schedules such as the STK dividends; every other schedule is evaluated
+/// over the full contract lifetime and truncated here, mirroring the
+/// upstream reference behaviour. The observed events (`eventsObserved`) are part of
 /// the evaluation environment the engines may replay (CSH analysis dates,
 /// the CLM exercise notice).
 ///
@@ -122,7 +125,8 @@ pub fn evaluate_case(
     use actus_model::EventType;
 
     let risk = ObservedRiskFactors::new(case.data_observed.clone())
-        .with_events(case.events_observed.clone());
+        .with_events(case.events_observed.clone())
+        .with_horizon(case.horizon());
     let mut events = registry.evaluate(&case.terms, &risk)?;
     if let Some(horizon) = case.horizon() {
         let settlement_times: BTreeSet<chrono::NaiveDateTime> = events
@@ -380,6 +384,7 @@ pub fn load_testbed(contract_type: ContractType) -> Result<Vec<ActusTestCase>, E
 pub struct ObservedRiskFactors {
     observations: BTreeMap<String, RiskFactorObservation>,
     events: Vec<ObservedEvent>,
+    horizon: Option<NaiveDateTime>,
 }
 
 impl ObservedRiskFactors {
@@ -388,7 +393,16 @@ impl ObservedRiskFactors {
         ObservedRiskFactors {
             observations,
             events: Vec::new(),
+            horizon: None,
         }
+    }
+
+    /// Sets the analysis horizon `tmax`, the case's `to` field (techspec
+    /// "Contract lifetime": the parameter that bounds the lifetime of a
+    /// contract without a natural end, such as STK).
+    pub fn with_horizon(mut self, horizon: Option<NaiveDateTime>) -> ObservedRiskFactors {
+        self.horizon = horizon;
+        self
     }
 
     /// Adds the case's externally observed events to the environment.
@@ -420,6 +434,10 @@ impl RiskFactorProvider for ObservedRiskFactors {
 
     fn observed_events(&self) -> Vec<actus_engine::ObservedEvent> {
         self.events.iter().cloned().map(Into::into).collect()
+    }
+
+    fn analysis_horizon(&self) -> Option<NaiveDateTime> {
+        self.horizon
     }
 
     fn observed_credit_events(&self) -> Vec<actus_engine::ObservedCreditEvent> {

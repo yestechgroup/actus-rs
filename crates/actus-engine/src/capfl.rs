@@ -278,6 +278,10 @@ impl RiskFactorProvider for ClampedRiskProvider<'_> {
     fn observed_credit_events(&self) -> Vec<ObservedCreditEvent> {
         self.inner.observed_credit_events()
     }
+
+    fn analysis_horizon(&self) -> Option<chrono::NaiveDateTime> {
+        self.inner.analysis_horizon()
+    }
 }
 
 #[cfg(test)]
