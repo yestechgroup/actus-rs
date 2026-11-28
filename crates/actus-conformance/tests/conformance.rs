@@ -402,7 +402,7 @@ fn ceg_testbed_gate() {
 
 #[test]
 fn ump_testbed_gate() {
-    gate("ump", 9, 63, &["ump01"]);
+    gate_complete("ump", 9, 63);
 }
 
 #[test]
