@@ -386,3 +386,33 @@ own (`event::call_money_sequence_rank`).
 **Out of scope.** American and Bermudan exercise (`OPXT` `A`/`B`), which
 the techspec drives by observed `XD` events, remain an error unless the
 contract carries its exercise date; no testbed case uses them.
+
+---
+
+## SI-009: the `ad0` testbed expects an `AD` event its inputs do not define (testbed defect)
+
+**Section.** PAM schedule, `AD` row (techspec l. 778):
+`t^AD = (t_0, t_1, ..., t_n)` "with `t_i`, i = 1, 2, ..., a custom
+input". ANN inherits it ("Same as PAM").
+
+**Question.** `actus-tests-ad0.json` holds one ANN case (`ann01`) whose
+expected results include an `AD` event at 2013-03-31T23:59:59. The case
+has no input that could produce it: the terms carry no analysis-date
+attribute (the dictionary has none), and `eventsObserved` and
+`dataObserved` are empty.
+
+**Chosen.** A testbed defect: the case lacks its custom `AD` input. The
+engine is not changed to invent the date, and the vendored file stays
+untouched; the `ad0` gate pins the case as failing (0/1).
+
+**Evidence.**
+- With the `AD` row removed from the expected results, the engine
+  reproduces the other 25 events exactly (scratch comparison through the
+  conformance comparator).
+- The expected `AD` state (`accruedInterest` 28.4857..., the accrual
+  `4192.4640650764 × 0.08 × 31/365` from 2013-03-01) shows the reference
+  evaluated an analysis date at 2013-04-01, which the case never passes in.
+- Supplying that date as an observed `AD` event does not help: the
+  fixed-income engines do not yet replay custom `AD` dates at all (only CSH
+  does). That gap is filed separately; it is a feature for user-supplied
+  analysis dates, not something this case can decide.
