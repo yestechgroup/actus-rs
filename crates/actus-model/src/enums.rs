@@ -196,11 +196,14 @@ actus_enum! {
 }
 
 actus_enum! {
-    /// ACTUS attribute `DS` — Delivery Settlement.
+    /// ACTUS attribute `DS` — Delivery Settlement (dictionary
+    /// `deliverySettlement`, default `D`).
     pub enum DeliverySettlement {
-        /// `S` — physical settlement.
+        /// `S` — cash settlement (`cashSettlement`): "the market value of
+        /// the underlying is settled".
         S => "S",
-        /// `D` — cash settlement.
+        /// `D` — physical settlement (`physicalSettlement`): "the
+        /// underlying is delivered physically".
         D => "D",
     }
 }
