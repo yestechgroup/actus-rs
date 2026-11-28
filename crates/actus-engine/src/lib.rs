@@ -19,6 +19,8 @@
 //! - [`risk`]: risk factor observation (techspec "Risk Factor Observer").
 //! - [`engine`]: contract type dispatch ([`ContractEngine`],
 //!   [`EngineRegistry`], [`evaluate`]).
+//! - `num` (crate-private): checked decimal arithmetic; overflow and
+//!   division by zero become [`EngineError::Arithmetic`].
 //!
 //! Contract type modules: [`pam`], [`lam`], [`lax`], [`nam`], [`ann`],
 //! [`clm`], [`ump`], [`csh`], [`stk`], [`com`], [`fxout`], [`swppv`],
@@ -26,6 +28,9 @@
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
+// Every Decimal and integer operation in library code must be checked:
+// untrusted terms must produce an EngineError, never a panic (see `num`).
+#![cfg_attr(not(test), deny(clippy::arithmetic_side_effects))]
 pub mod ann;
 pub mod capfl;
 pub mod cec;
@@ -44,6 +49,7 @@ pub mod fxout;
 pub mod lam;
 pub mod lax;
 pub mod nam;
+pub(crate) mod num;
 pub mod optns;
 pub mod pam;
 pub mod risk;
@@ -56,6 +62,7 @@ pub mod ump;
 
 pub use engine::{evaluate, ContractEngine, EngineRegistry};
 pub use event::{sort_events, ContractEvent};
+pub use num::ArithmeticFailure;
 pub use risk::{ObservedCreditEvent, ObservedEvent, RiskFactorProvider, StateProvider};
 pub use state::{ContractState, ContractStatus};
 
@@ -92,4 +99,10 @@ pub enum EngineError {
     /// An event sequence produced an invalid state transition.
     #[error("invalid state transition: {0}")]
     InvalidTransition(String),
+    /// A payoff or state computation left the representable `Decimal` range
+    /// (about ±7.9e28) or divided by zero. Every operation is checked
+    /// (see the crate's `num` module), so extreme terms produce this error
+    /// instead of a panic.
+    #[error("arithmetic failure in contract evaluation: {0}")]
+    Arithmetic(ArithmeticFailure),
 }

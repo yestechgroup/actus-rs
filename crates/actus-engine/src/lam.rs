@@ -57,7 +57,6 @@
 //!   initial exchange while the calculation stays on the schedule date).
 
 use chrono::NaiveDateTime;
-use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 
 use actus_model::{
@@ -66,8 +65,8 @@ use actus_model::{
 };
 
 use crate::common::{
-    base_is_nt, base_tracks_notional, initial_base_amount, role_sign, stub_series,
-    term_scaling_multipliers,
+    base_is_nt, base_tracks_notional, initial_base_amount, redemption_count, role_sign,
+    stub_series, term_scaling_multipliers,
 };
 use crate::daycount::{day_count_fraction, normalize_timestamp};
 use crate::engine::ContractEngine;
@@ -77,6 +76,7 @@ use crate::fixed_income::{
     rate_reset_schedule, scales_interest, scales_notional, scaling_index_schedule, Conventions,
     RateReset, ScheduledEvent, Timing,
 };
+use crate::num::ck;
 use crate::risk::RiskFactorProvider;
 use crate::schedule::cycle_step;
 use crate::state::{ContractState, ContractStatus};
@@ -254,9 +254,7 @@ impl Context {
                 let prnxt = terms.next_principal_redemption_payment.ok_or(
                     EngineError::MissingAttribute("nextPrincipalRedemptionPayment"),
                 )?;
-                let redemptions = (notional / prnxt)
-                    .ceil()
-                    .to_u64()
+                let redemptions = redemption_count(notional, prnxt)
                     .ok_or(EngineError::InvalidTransition(
                     "notional principal is not redeemable by the next principal redemption payment"
                         .to_string(),
@@ -274,7 +272,7 @@ impl Context {
                         "principal redemption schedule is empty".to_string(),
                     ));
                 }
-                notional / Decimal::from(elements as u64)
+                (ck(notional) / Decimal::from(elements as u64)).get()?
             }
         };
         Ok(Context {
@@ -426,14 +424,16 @@ impl Context {
         risk: &dyn RiskFactorProvider,
     ) -> Result<Decimal, EngineError> {
         let yf = day_count_fraction(state.status_date, slot.calc, self.dcc)?;
-        let accrual = yf * state.nominal_interest_rate * state.interest_calculation_base_amount;
+        let accrual =
+            (ck(yf) * state.nominal_interest_rate * state.interest_calculation_base_amount)
+                .get()?;
         let payoff = match slot.kind {
             Kind::InitialExchange => {
                 let notional = terms
                     .notional_principal
                     .ok_or(EngineError::MissingAttribute("notionalPrincipal"))?;
                 let premium = terms.premium_discount_at_ied.unwrap_or(Decimal::ZERO);
-                state.notional_principal = self.sgn * notional;
+                state.notional_principal = (ck(self.sgn) * notional).get()?;
                 state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
                 state.accrued_interest =
                     fixed_income::initial_accrued(terms, state, slot.calc, self.dcc, self.sgn)?;
@@ -442,30 +442,33 @@ impl Context {
                 state.interest_scaling_multiplier = interest_scaling;
                 state.notional_scaling_multiplier = notional_scaling;
                 state.interest_calculation_base_amount =
-                    initial_base_amount(terms, notional, self.sgn);
-                self.sgn * -(notional + premium)
+                    initial_base_amount(terms, notional, self.sgn)?;
+                (ck(self.sgn) * -(ck(notional) + premium)).get()?
             }
             Kind::PrincipalRedemption => {
-                state.accrued_interest += accrual;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 let redemption = state.next_principal_redemption_payment;
-                state.notional_principal -= self.sgn * redemption;
+                state.notional_principal =
+                    (ck(state.notional_principal) - ck(self.sgn) * redemption).get()?;
                 if self.base_tracks_notional {
                     state.interest_calculation_base_amount = state.notional_principal;
                 }
                 state.next_principal_redemption_payment =
                     redemption.min(state.notional_principal.abs());
-                self.sgn * state.notional_scaling_multiplier * redemption
+                (ck(self.sgn) * state.notional_scaling_multiplier * redemption).get()?
             }
             Kind::InterestPayment => {
-                state.accrued_interest += accrual;
-                let payoff = state.interest_scaling_multiplier * state.accrued_interest;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
+                let payoff =
+                    (ck(state.interest_scaling_multiplier) * state.accrued_interest).get()?;
                 state.accrued_interest = Decimal::ZERO;
                 state.last_interest_payment_date = Some(slot.calc);
                 payoff
             }
             Kind::InterestCapitalization => {
-                state.accrued_interest += accrual;
-                state.notional_principal += state.accrued_interest;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
+                state.notional_principal =
+                    (ck(state.notional_principal) + state.accrued_interest).get()?;
                 state.accrued_interest = Decimal::ZERO;
                 if base_is_nt(terms) {
                     state.interest_calculation_base_amount = state.notional_principal;
@@ -473,12 +476,12 @@ impl Context {
                 Decimal::ZERO
             }
             Kind::InterestCalculationBaseFixing => {
-                state.accrued_interest += accrual;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 state.interest_calculation_base_amount = state.notional_principal;
                 Decimal::ZERO
             }
             Kind::RateReset => {
-                state.accrued_interest += accrual;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 let code = terms
                     .market_object_code_of_rate_reset
                     .as_deref()
@@ -491,18 +494,18 @@ impl Context {
                         })?;
                 let multiplier = terms.rate_multiplier.unwrap_or(Decimal::ONE);
                 let spread = terms.rate_spread.unwrap_or(Decimal::ZERO);
-                state.nominal_interest_rate = observed * multiplier + spread;
+                state.nominal_interest_rate = (ck(observed) * multiplier + spread).get()?;
                 Decimal::ZERO
             }
             Kind::RateResetFixed => {
-                state.accrued_interest += accrual;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 state.nominal_interest_rate = terms
                     .next_reset_rate
                     .ok_or(EngineError::MissingAttribute("nextResetRate"))?;
                 Decimal::ZERO
             }
             Kind::ScalingIndexFixing => {
-                state.accrued_interest += accrual;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 let code = terms.market_object_code_of_scaling_index.as_deref().ok_or(
                     EngineError::MissingAttribute("marketObjectCodeOfScalingIndex"),
                 )?;
@@ -515,7 +518,7 @@ impl Context {
                 let deal_date_index = terms.scaling_index_at_contract_deal_date.ok_or(
                     EngineError::MissingAttribute("scalingIndexAtContractDealDate"),
                 )?;
-                let factor = observed / deal_date_index;
+                let factor = (ck(observed) / deal_date_index).get()?;
                 if scales_notional(terms.scaling_effect) {
                     state.notional_scaling_multiplier = factor;
                 }
@@ -525,18 +528,18 @@ impl Context {
                 Decimal::ZERO
             }
             Kind::Purchase => {
-                state.accrued_interest += accrual;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 let price = terms
                     .price_at_purchase_date
                     .ok_or(EngineError::MissingAttribute("priceAtPurchaseDate"))?;
-                self.sgn * -(price + state.accrued_interest)
+                (ck(self.sgn) * -(ck(price) + state.accrued_interest)).get()?
             }
             Kind::Termination => {
-                state.accrued_interest += accrual;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 let price = terms
                     .price_at_termination_date
                     .ok_or(EngineError::MissingAttribute("priceAtTerminationDate"))?;
-                let payoff = self.sgn * (price + state.accrued_interest);
+                let payoff = (ck(self.sgn) * (ck(price) + state.accrued_interest)).get()?;
                 state.notional_principal = Decimal::ZERO;
                 state.accrued_interest = Decimal::ZERO;
                 state.fee_accrued = Decimal::ZERO;
@@ -545,9 +548,10 @@ impl Context {
                 payoff
             }
             Kind::Maturity => {
-                let payoff = state.notional_scaling_multiplier * state.notional_principal
-                    + state.interest_scaling_multiplier * state.accrued_interest
-                    + state.fee_accrued;
+                let payoff = (ck(state.notional_scaling_multiplier) * state.notional_principal
+                    + ck(state.interest_scaling_multiplier) * state.accrued_interest
+                    + state.fee_accrued)
+                    .get()?;
                 state.notional_principal = Decimal::ZERO;
                 state.accrued_interest = Decimal::ZERO;
                 state.fee_accrued = Decimal::ZERO;
@@ -565,13 +569,13 @@ impl Context {
 /// `Ipcb` row: `t0 < IED` yields a zeroed calculation base): the redemption
 /// amount and scaling multipliers are already resolved from the terms, the
 /// monetary and rate states stay zero until `IED`.
-fn initial_state(ctx: &Context, terms: &ContractTerms) -> ContractState {
+fn initial_state(ctx: &Context, terms: &ContractTerms) -> Result<ContractState, EngineError> {
     let mut state = ContractState::initial(terms);
     state.next_principal_redemption_payment = ctx.next_principal_redemption;
     let (interest_scaling, notional_scaling) = term_scaling_multipliers(terms);
     state.interest_scaling_multiplier = interest_scaling;
     state.notional_scaling_multiplier = notional_scaling;
-    state
+    Ok(state)
 }
 
 /// Builds the states-at-t0 of a progressed contract whose `IED` precedes the
@@ -585,17 +589,17 @@ fn progressed_initial(ctx: &Context, terms: &ContractTerms) -> Result<ContractSt
     let notional = terms
         .notional_principal
         .ok_or(EngineError::MissingAttribute("notionalPrincipal"))?;
-    state.notional_principal = ctx.sgn * notional;
+    state.notional_principal = (ck(ctx.sgn) * notional).get()?;
     state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
     state.next_principal_redemption_payment = ctx.next_principal_redemption;
     let (interest_scaling, notional_scaling) = term_scaling_multipliers(terms);
     state.interest_scaling_multiplier = interest_scaling;
     state.notional_scaling_multiplier = notional_scaling;
-    state.interest_calculation_base_amount = initial_base_amount(terms, notional, ctx.sgn);
+    state.interest_calculation_base_amount = initial_base_amount(terms, notional, ctx.sgn)?;
     state.accrued_interest = match terms.nominal_interest_rate {
         None => Decimal::ZERO,
         Some(_) => match terms.accrued_interest {
-            Some(accrued) => ctx.sgn * accrued,
+            Some(accrued) => (ck(ctx.sgn) * accrued).get()?,
             None => fixed_income::progressed_accrued(
                 &ctx.conventions(),
                 terms,

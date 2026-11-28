@@ -49,6 +49,7 @@ use actus_model::{
 use crate::daycount::{day_count_fraction, normalize_timestamp};
 use crate::engine::ContractEngine;
 use crate::event::{sequence_rank, ContractEvent};
+use crate::num::ck;
 use crate::risk::RiskFactorProvider;
 use crate::schedule::cycle_step;
 use crate::state::{ContractState, ContractStatus};
@@ -182,7 +183,7 @@ impl ContractEngine for UmpEngine {
         slots.sort_by_key(|slot| (slot.time, slot.kind.priority()));
 
         let mut state = ContractState::initial(terms);
-        state.notional_principal = sgn * notional;
+        state.notional_principal = (ck(sgn) * notional).get()?;
         state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
         state.accrued_interest = terms.accrued_interest.unwrap_or(Decimal::ZERO);
         let mut events = Vec::new();
@@ -273,35 +274,38 @@ impl Context {
         risk: &dyn RiskFactorProvider,
     ) -> Result<Decimal, EngineError> {
         let y = day_count_fraction(state.status_date, slot.time, self.dcc)?;
-        let accrual = y * state.nominal_interest_rate * state.notional_principal;
+        let accrual = (ck(y) * state.nominal_interest_rate * state.notional_principal).get()?;
         let payoff = match slot.kind {
             Kind::InitialExchange => {
                 let notional = terms
                     .notional_principal
                     .ok_or(EngineError::MissingAttribute("notionalPrincipal"))?;
-                state.notional_principal = self.sgn * notional;
+                state.notional_principal = (ck(self.sgn) * notional).get()?;
                 state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
                 state.accrued_interest = terms.accrued_interest.unwrap_or(Decimal::ZERO);
-                -self.sgn * notional
+                (-ck(self.sgn) * notional).get()?
             }
             Kind::PrincipalRedemption => {
-                state.accrued_interest += accrual;
-                let mut payoff = state.notional_scaling_multiplier
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
+                let mut payoff = (ck(state.notional_scaling_multiplier)
                     * self.sgn
-                    * state.next_principal_redemption_payment;
+                    * state.next_principal_redemption_payment)
+                    .get()?;
                 if payoff.abs() > state.notional_principal.abs() {
                     payoff = state.notional_principal;
                 }
-                state.notional_principal -= payoff;
+                state.notional_principal = (ck(state.notional_principal) - payoff).get()?;
                 payoff
             }
             Kind::InterestPayment => {
-                let payoff = state.interest_scaling_multiplier * (state.accrued_interest + accrual);
+                let payoff = (state.interest_scaling_multiplier
+                    * (ck(state.accrued_interest) + accrual))
+                    .get()?;
                 state.accrued_interest = Decimal::ZERO;
                 payoff
             }
             Kind::RateReset => {
-                state.accrued_interest += accrual;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 let code = terms
                     .market_object_code_of_rate_reset
                     .as_deref()
@@ -314,14 +318,15 @@ impl Context {
                         })?;
                 let multiplier = terms.rate_multiplier.unwrap_or(Decimal::ONE);
                 let spread = terms.rate_spread.unwrap_or(Decimal::ZERO);
-                state.nominal_interest_rate = observed * multiplier + spread;
+                state.nominal_interest_rate = (ck(observed) * multiplier + spread).get()?;
                 Decimal::ZERO
             }
             Kind::Termination => {
                 let price = terms
                     .price_at_termination_date
                     .ok_or(EngineError::MissingAttribute("priceAtTerminationDate"))?;
-                let payoff = self.sgn * (price + state.accrued_interest + accrual);
+                let payoff =
+                    (ck(self.sgn) * (ck(price) + state.accrued_interest + accrual)).get()?;
                 state.notional_principal = Decimal::ZERO;
                 state.accrued_interest = Decimal::ZERO;
                 state.fee_accrued = Decimal::ZERO;
@@ -348,7 +353,8 @@ fn roll_series(
     let mut rolls = vec![anchor];
     let mut index: u64 = 0;
     loop {
-        index += 1;
+        // Bounded by the 20_000 check below, so never saturates.
+        index = index.saturating_add(1);
         let next = cycle_step(anchor, index, cycle, eomc)?;
         if next >= termination {
             break;

@@ -1,0 +1,36 @@
+[package]
+name = "actus-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+description = "cargo-fuzz targets: untrusted terms JSON must never panic or hang"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+actus-wasm = { path = "../crates/actus-wasm" }
+actus-testgen = { path = "../crates/actus-testgen" }
+
+# Not part of the main workspace: cargo-fuzz needs nightly and sanitizers.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "json_raw"
+path = "fuzz_targets/json_raw.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "terms_structured"
+path = "fuzz_targets/terms_structured.rs"
+test = false
+doc = false
+bench = false
+
+[profile.release]
+debug = 1

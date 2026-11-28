@@ -116,13 +116,13 @@ fn walk_to_business_day(
     step: impl Fn(NaiveDateTime) -> Option<NaiveDateTime>,
 ) -> NaiveDateTime {
     let mut candidate = t;
-    let mut hops = 0;
+    let mut hops: u32 = 0;
     while !is_business_day(candidate, cal) {
         let Some(next) = step(candidate) else {
             return candidate;
         };
         candidate = next;
-        hops += 1;
+        hops = hops.saturating_add(1);
         // INVARIANT: every `Calendar` has business days at most two days
         // apart (`NC`: every day; `MF`: Monday to Friday), so this limit is
         // never reached. It guards against a future calendar without any.
@@ -339,7 +339,8 @@ pub fn generate_schedule(
     let mut i: u64 = 0;
     let roll_overshot_termination;
     loop {
-        i += 1;
+        // Bounded by the MAX_SCHEDULE_ROLLS check below, so never saturates.
+        i = i.saturating_add(1);
         let next = add_cycle(anchor, i, cycle, snap_to_month_end)?;
         if next >= termination {
             roll_overshot_termination = next > termination;
@@ -361,7 +362,8 @@ pub fn generate_schedule(
     } else {
         rolled.push(termination);
     }
-    let final_index = rolled.len() - 1;
+    // `rolled` holds at least the anchor and the termination.
+    let final_index = rolled.len().saturating_sub(1);
     let shifted = rolled
         .into_iter()
         .enumerate()
@@ -450,7 +452,7 @@ pub fn array_series(
     let mut unshifted: Vec<NaiveDateTime> = Vec::new();
     for (index, anchor) in anchors.iter().enumerate() {
         let cycle = cycle_at(index);
-        let termination = match anchors.get(index + 1) {
+        let termination = match anchors.get(index.saturating_add(1)) {
             Some(next) => cycle_back(*next, cycle, eomc)?,
             None => end,
         };

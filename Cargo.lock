@@ -39,6 +39,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "actus-testgen"
+version = "0.1.0"
+dependencies = [
+ "actus-model",
+ "actus-wasm",
+ "proptest",
+ "rust_decimal",
+ "serde_json",
+]
+
+[[package]]
 name = "actus-wasm"
 version = "0.1.0"
 dependencies = [

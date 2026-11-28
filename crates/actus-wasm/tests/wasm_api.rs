@@ -341,3 +341,15 @@ fn ordinary_schedules_still_evaluate() {
         serde_json::from_str(&actus_wasm::dto::evaluate_json(&json).unwrap()).unwrap();
     assert!(result["events"].as_array().is_some_and(|e| e.len() > 10));
 }
+
+mod regression_cases;
+
+/// Inputs that used to panic (an abort in the WASM build) are errors now.
+#[test]
+fn former_panics_are_reported_as_errors() {
+    for (name, terms, scenario, expected) in regression_cases::CASES {
+        let error = actus_wasm::dto::evaluate_json_with_risk(terms, scenario)
+            .expect_err(&format!("{name} must be rejected"));
+        assert!(error.contains(expected), "{name}: {error}");
+    }
+}

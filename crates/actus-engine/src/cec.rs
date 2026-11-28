@@ -49,14 +49,15 @@ use rust_decimal::Decimal;
 
 use actus_model::{
     ContractReference, ContractReferenceRole, ContractRole, ContractTerms, ContractType,
-    CreditEventType, EventType, GuaranteedExposure,
+    CreditEventType, EventType,
 };
 
 use crate::credit_enhancement::{
-    covered_contract_value, credit_event_trigger, maturity_date, settlement_date,
+    covered_exposure, credit_event_trigger, maturity_date, settlement_date,
 };
 use crate::engine::ContractEngine;
 use crate::event::ContractEvent;
+use crate::num::{self, ck};
 use crate::risk::RiskFactorProvider;
 use crate::state::ContractState;
 use crate::EngineError;
@@ -108,8 +109,9 @@ impl ContractEngine for CecEngine {
         };
 
         let coverage = terms.coverage_of_credit_enhancement.unwrap_or(Decimal::ONE);
-        let exposure =
-            coverage * covered_exposure(&covered, trigger.time, terms.guaranteed_exposure, risk)?;
+        let exposure = (ck(coverage)
+            * covered_exposure(&covered, trigger.time, terms.guaranteed_exposure, risk)?)
+        .get()?;
         let collateral = covering_value(&covering, trigger.time, risk)?;
         let settlement_time = settlement_date(terms, trigger.time)?;
 
@@ -119,12 +121,12 @@ impl ContractEngine for CecEngine {
                 time: trigger.time,
                 payoff: Decimal::ZERO,
                 currency: terms.currency.clone(),
-                state: event_state(sign * exposure, trigger.time),
+                state: event_state((ck(sign) * exposure).get()?, trigger.time),
             },
             ContractEvent {
                 event_type: EventType::Settlement,
                 time: settlement_time,
-                payoff: sign * collateral.min(exposure),
+                payoff: (ck(sign) * collateral.min(exposure)).get()?,
                 currency: terms.currency.clone(),
                 state: event_state(Decimal::ZERO, settlement_time),
             },
@@ -142,24 +144,6 @@ fn cec_role_sign(role: Option<ContractRole>) -> Decimal {
     }
 }
 
-/// The covered exposure `sum(n_i)` at the credit event time (techspec "CEC"
-/// states table, `Nt` initialisation).
-///
-/// Each covered contract is evaluated under its own contract role through
-/// its own engine; the parent role sign is applied by the caller after
-/// aggregation.
-fn covered_exposure(
-    covered: &[&ContractReference],
-    at: NaiveDateTime,
-    basis: Option<GuaranteedExposure>,
-    risk: &dyn RiskFactorProvider,
-) -> Result<Decimal, EngineError> {
-    covered
-        .iter()
-        .map(|reference| covered_contract_value(reference, at, basis, risk))
-        .sum()
-}
-
 /// The covering collateral value `sum(v_j)` at the credit event time, read
 /// from the market value observation of each covering object (`v_j =
 /// obs(rf, MOC_j, t)`).
@@ -168,7 +152,7 @@ fn covering_value(
     at: NaiveDateTime,
     risk: &dyn RiskFactorProvider,
 ) -> Result<Decimal, EngineError> {
-    covering
+    let values = covering
         .iter()
         .map(|reference| {
             let object = reference
@@ -186,7 +170,8 @@ fn covering_value(
                 at: at.to_string(),
             })
         })
-        .sum()
+        .collect::<Result<Vec<Decimal>, EngineError>>()?;
+    num::sum(values)
 }
 
 /// Builds a post-event state carrying the given notional at the event time.

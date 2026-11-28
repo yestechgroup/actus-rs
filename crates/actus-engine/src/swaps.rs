@@ -44,6 +44,7 @@ use crate::engine::{ContractEngine, EngineRegistry};
 use crate::event::{sort_events, ContractEvent};
 use crate::lam::LamEngine;
 use crate::nam::NamEngine;
+use crate::num::ck;
 use crate::pam::PamEngine;
 use crate::risk::RiskFactorProvider;
 use crate::state::ContractState;
@@ -72,7 +73,7 @@ impl ContractEngine for SwapsEngine {
         apply_observation_window(terms, &mut stream, parent_sign)?;
         sort_events(&mut stream);
         if terms.delivery_settlement == Some(DeliverySettlement::S) {
-            stream = merge_congruent(terms, stream);
+            stream = merge_congruent(terms, stream)?;
         }
         Ok(stream)
     }
@@ -185,7 +186,7 @@ fn apply_observation_window(
         stream.push(parent_event(
             EventType::Purchase,
             prd,
-            parent_sign * price,
+            (ck(parent_sign) * price).get()?,
             terms,
         ));
     }
@@ -195,7 +196,7 @@ fn apply_observation_window(
         stream.push(parent_event(
             EventType::Termination,
             td,
-            parent_sign * price,
+            (ck(parent_sign) * price).get()?,
             terms,
         ));
     }
@@ -228,15 +229,16 @@ fn parent_event(
 pub(crate) fn merge_congruent(
     terms: &ContractTerms,
     stream: Vec<ContractEvent>,
-) -> Vec<ContractEvent> {
+) -> Result<Vec<ContractEvent>, EngineError> {
     let parent_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
     let parent_accrued = terms.accrued_interest.unwrap_or(Decimal::ZERO);
     let mut merged: Vec<ContractEvent> = Vec::with_capacity(stream.len());
     for event in stream {
         if let Some(last) = merged.last_mut() {
             if last.time == event.time && last.event_type == event.event_type {
-                last.payoff += event.payoff;
-                last.state.notional_principal += event.state.notional_principal;
+                last.payoff = (ck(last.payoff) + event.payoff).get()?;
+                last.state.notional_principal =
+                    (ck(last.state.notional_principal) + event.state.notional_principal).get()?;
                 last.state.nominal_interest_rate = parent_rate;
                 last.state.accrued_interest = parent_accrued;
                 continue;
@@ -244,7 +246,7 @@ pub(crate) fn merge_congruent(
         }
         merged.push(event);
     }
-    merged
+    Ok(merged)
 }
 
 #[cfg(test)]

@@ -43,6 +43,7 @@ use crate::common::role_sign;
 use crate::daycount::normalize_timestamp;
 use crate::engine::{ContractEngine, EngineRegistry};
 use crate::event::ContractEvent;
+use crate::num::ck;
 use crate::risk::{ObservedCreditEvent, ObservedEvent, RiskFactorProvider};
 use crate::state::{ContractState, ContractStatus};
 use crate::EngineError;
@@ -115,7 +116,11 @@ impl ContractEngine for CapflEngine {
             events.push(ContractEvent {
                 event_type: EventType::InterestPayment,
                 time: uncapped_event.time,
-                payoff: sign * (uncapped_event.payoff - capped_event.payoff).abs(),
+                payoff: (ck(sign)
+                    * (ck(uncapped_event.payoff) - capped_event.payoff)
+                        .get()?
+                        .abs())
+                .get()?,
                 currency: terms.currency.clone(),
                 state: uncapped_event.state.clone(),
             });
@@ -244,14 +249,17 @@ impl RiskFactorProvider for ClampedRiskProvider<'_> {
     fn rate(&self, market_object_code: &str, at: chrono::NaiveDateTime) -> Option<Decimal> {
         let observed = self.inner.rate(market_object_code, at)?;
         let mut clamped = observed;
+        // A bound outside the Decimal range (or a zero multiplier, which the
+        // engine rejects up front) leaves no observation: the capped run then
+        // reports the missing risk factor instead of panicking.
         if let Some(cap) = self.cap {
-            let bound = (cap - self.spread) / self.multiplier;
+            let bound = ((ck(cap) - self.spread) / self.multiplier).get().ok()?;
             if clamped > bound {
                 clamped = bound;
             }
         }
         if let Some(floor) = self.floor {
-            let bound = (floor - self.spread) / self.multiplier;
+            let bound = ((ck(floor) - self.spread) / self.multiplier).get().ok()?;
             if clamped < bound {
                 clamped = bound;
             }

@@ -1,0 +1,317 @@
+[
+ {
+  "name": "collateral01",
+  "terms": {
+   "contractType": "CEC",
+   "contractID": "collateral01",
+   "contractRole": "BUY",
+   "contractStructure": [
+    {
+     "object": {
+      "contractType": "PAM",
+      "contractID": "US91282XYZ01",
+      "statusDate": "2020-01-01T00:00:00",
+      "contractDealDate": "2020-01-01T00:00:00",
+      "currency": "USD",
+      "notionalPrincipal": "1000000",
+      "initialExchangeDate": "2020-01-02T00:00:00",
+      "maturityDate": "2020-12-31T00:00:00",
+      "nominalInterestRate": "0.03",
+      "cycleAnchorDateOfInterestPayment": "2020-02-01T00:00:00",
+      "cycleOfInterestPayment": "P1ML0",
+      "dayCountConvention": "A365",
+      "endOfMonthConvention": "SD",
+      "contractRole": "RPA"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "COVE"
+    },
+    {
+     "object": {
+      "contractType": "COM",
+      "contractID": "GOLD01X12DF3VW",
+      "statusDate": "2020-01-01T00:00:00",
+      "contractDealDate": "2020-01-01T00:00:00",
+      "currency": "USD",
+      "contractRole": "RPA",
+      "creatorId": "PartyXYZ",
+      "marketObjectCode": "GOLD",
+      "quantity": "1",
+      "unit": "ONC"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "COVI"
+    }
+   ],
+   "currency": "USD",
+   "calendar": "NC",
+   "contractDealDate": "2020-01-01T00:00:00",
+   "statusDate": "2020-01-01T00:00:00",
+   "creditEventTypeCovered": "DF",
+   "settlementPeriod": "P0D"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {
+    "GOLD": {
+     "2020-09-19T00:00:00": "10000000"
+    }
+   },
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "collateral02",
+  "terms": {
+   "contractType": "CEC",
+   "contractID": "collateral02",
+   "contractRole": "BUY",
+   "contractStructure": [
+    {
+     "object": {
+      "contractType": "PAM",
+      "contractID": "US91282XYZ01",
+      "statusDate": "2020-01-01T00:00:00",
+      "contractDealDate": "2020-01-01T00:00:00",
+      "currency": "USD",
+      "notionalPrincipal": "1000000",
+      "initialExchangeDate": "2020-01-02T00:00:00",
+      "maturityDate": "2020-12-31T00:00:00",
+      "nominalInterestRate": "0.03",
+      "cycleAnchorDateOfInterestPayment": "2020-02-01T00:00:00",
+      "cycleOfInterestPayment": "P1ML0",
+      "dayCountConvention": "A365",
+      "endOfMonthConvention": "SD",
+      "contractRole": "RPA"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "COVE"
+    },
+    {
+     "object": {
+      "contractType": "COM",
+      "contractID": "GOLD01X12DF3VW",
+      "statusDate": "2020-01-01T00:00:00",
+      "contractDealDate": "2020-01-01T00:00:00",
+      "currency": "USD",
+      "contractRole": "RPA",
+      "creatorId": "PartyXYZ",
+      "marketObjectCode": "GOLD",
+      "quantity": "1",
+      "unit": "ONC"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "COVI"
+    }
+   ],
+   "currency": "USD",
+   "calendar": "NC",
+   "contractDealDate": "2020-01-01T00:00:00",
+   "statusDate": "2020-01-01T00:00:00",
+   "creditEventTypeCovered": "DF",
+   "settlementPeriod": "P0D"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {
+    "GOLD": {
+     "2020-09-20T00:00:00": "10000000"
+    }
+   },
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "collateral03",
+  "terms": {
+   "contractType": "CEC",
+   "contractID": "collateral03",
+   "contractRole": "BUY",
+   "contractStructure": [
+    {
+     "object": {
+      "contractType": "PAM",
+      "contractID": "NON_MATCHING_CID",
+      "statusDate": "2020-01-01T00:00:00",
+      "contractDealDate": "2020-01-01T00:00:00",
+      "currency": "USD",
+      "notionalPrincipal": "1000000",
+      "initialExchangeDate": "2020-01-02T00:00:00",
+      "maturityDate": "2020-12-31T00:00:00",
+      "nominalInterestRate": "0.03",
+      "cycleAnchorDateOfInterestPayment": "2020-02-01T00:00:00",
+      "cycleOfInterestPayment": "P1ML0",
+      "dayCountConvention": "A365",
+      "endOfMonthConvention": "SD",
+      "contractRole": "RPA"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "COVE"
+    },
+    {
+     "object": {
+      "contractType": "COM",
+      "contractID": "GOLD01X12DF3VW",
+      "statusDate": "2020-01-01T00:00:00",
+      "contractDealDate": "2020-01-01T00:00:00",
+      "currency": "USD",
+      "contractRole": "RPA",
+      "creatorId": "PartyXYZ",
+      "marketObjectCode": "GOLD",
+      "quantity": "1",
+      "unit": "ONC"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "COVI"
+    }
+   ],
+   "currency": "USD",
+   "calendar": "NC",
+   "contractDealDate": "2020-01-01T00:00:00",
+   "statusDate": "2020-01-01T00:00:00",
+   "creditEventTypeCovered": "DF",
+   "settlementPeriod": "P0D"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {
+    "GOLD": {
+     "2020-09-20T00:00:00": "10000000"
+    }
+   },
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "collateral04",
+  "terms": {
+   "contractType": "CEC",
+   "contractID": "collateral04",
+   "contractRole": "BUY",
+   "contractStructure": [
+    {
+     "object": {
+      "contractType": "PAM",
+      "contractID": "US91282XYZ01",
+      "statusDate": "2020-01-01T00:00:00",
+      "contractDealDate": "2020-01-01T00:00:00",
+      "currency": "USD",
+      "notionalPrincipal": "1000000",
+      "initialExchangeDate": "2020-01-02T00:00:00",
+      "maturityDate": "2020-06-30T00:00:00",
+      "nominalInterestRate": "0.03",
+      "cycleAnchorDateOfInterestPayment": "2020-02-01T00:00:00",
+      "cycleOfInterestPayment": "P1ML0",
+      "dayCountConvention": "A365",
+      "endOfMonthConvention": "SD",
+      "contractRole": "RPA"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "COVE"
+    },
+    {
+     "object": {
+      "contractType": "COM",
+      "contractID": "GOLD01X12DF3VW",
+      "statusDate": "2020-01-01T00:00:00",
+      "contractDealDate": "2020-01-01T00:00:00",
+      "currency": "USD",
+      "contractRole": "RPA",
+      "creatorId": "PartyXYZ",
+      "marketObjectCode": "GOLD",
+      "quantity": "1",
+      "unit": "ONC"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "COVI"
+    }
+   ],
+   "currency": "USD",
+   "calendar": "NC",
+   "contractDealDate": "2020-01-01T00:00:00",
+   "statusDate": "2020-01-01T00:00:00",
+   "creditEventTypeCovered": "DF",
+   "settlementPeriod": "P0D"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {
+    "GOLD": {
+     "2020-09-20T00:00:00": "10000000"
+    }
+   },
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "collateral05",
+  "terms": {
+   "contractType": "CEC",
+   "contractID": "collateral05",
+   "contractRole": "BUY",
+   "contractStructure": [
+    {
+     "object": {
+      "contractType": "PAM",
+      "contractID": "US91282XYZ01",
+      "statusDate": "2020-01-01T00:00:00",
+      "contractDealDate": "2020-01-01T00:00:00",
+      "currency": "USD",
+      "notionalPrincipal": "1000000",
+      "initialExchangeDate": "2020-01-02T00:00:00",
+      "maturityDate": "2020-12-31T00:00:00",
+      "nominalInterestRate": "0.03",
+      "cycleAnchorDateOfInterestPayment": "2020-02-01T00:00:00",
+      "cycleOfInterestPayment": "P1ML0",
+      "dayCountConvention": "A365",
+      "endOfMonthConvention": "SD",
+      "contractRole": "RPA"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "COVE"
+    },
+    {
+     "object": {
+      "contractType": "COM",
+      "contractID": "GOLD01X12DF3VW",
+      "statusDate": "2020-01-01T00:00:00",
+      "contractDealDate": "2020-01-01T00:00:00",
+      "currency": "USD",
+      "contractRole": "RPA",
+      "creatorId": "PartyXYZ",
+      "marketObjectCode": "GOLD",
+      "quantity": "1",
+      "unit": "ONC"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "COVI"
+    }
+   ],
+   "currency": "USD",
+   "calendar": "NC",
+   "contractDealDate": "2020-01-01T00:00:00",
+   "statusDate": "2020-01-01T00:00:00",
+   "creditEventTypeCovered": "DF",
+   "settlementPeriod": "P0D"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {
+    "GOLD": {
+     "2020-09-20T00:00:00": "10000000"
+    }
+   },
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ }
+]

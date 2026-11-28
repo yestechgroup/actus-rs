@@ -48,6 +48,7 @@ use actus_model::{ContractTerms, ContractType, EndOfMonthConvention, EventType};
 use crate::daycount::normalize_timestamp;
 use crate::engine::ContractEngine;
 use crate::event::{sequence_rank, ContractEvent};
+use crate::num::ck;
 use crate::risk::RiskFactorProvider;
 use crate::schedule::cycle_step;
 use crate::state::{ContractState, ContractStatus};
@@ -117,7 +118,7 @@ pub(crate) fn evaluate_position(
                 payoff: if price_moves_with_purchase {
                     Decimal::ZERO
                 } else {
-                    -sgn * quantity * entry_price
+                    (-ck(sgn) * quantity * entry_price).get()?
                 },
             });
         }
@@ -127,7 +128,7 @@ pub(crate) fn evaluate_position(
             slots.push(Slot {
                 kind: Kind::Purchase,
                 time: prd,
-                payoff: -sgn * quantity * entry_price,
+                payoff: (-ck(sgn) * quantity * entry_price).get()?,
             });
         }
     }
@@ -148,7 +149,7 @@ pub(crate) fn evaluate_position(
             slots.push(Slot {
                 kind: Kind::Termination,
                 time: td,
-                payoff: sgn * quantity * price,
+                payoff: (ck(sgn) * quantity * price).get()?,
             });
         }
     }
@@ -159,7 +160,7 @@ pub(crate) fn evaluate_position(
     for slot in slots {
         match slot.kind {
             Kind::InitialExchange | Kind::Purchase => {
-                state.notional_principal = sgn * quantity * entry_price;
+                state.notional_principal = (ck(sgn) * quantity * entry_price).get()?;
             }
             Kind::Termination => {
                 state.notional_principal = Decimal::ZERO;
@@ -230,7 +231,7 @@ fn dividend_slots(
         return Ok(());
     };
     let amount = terms.next_dividend_payment_amount.unwrap_or(Decimal::ZERO);
-    let payoff = sgn * quantity * amount;
+    let payoff = (ck(sgn) * quantity * amount).get()?;
     let rolls = match terms.cycle_of_dividend.as_ref() {
         Some(cycle) => {
             let eomc = terms
@@ -240,7 +241,8 @@ fn dividend_slots(
             if let Some(termination) = termination {
                 let mut index: u64 = 0;
                 loop {
-                    index += 1;
+                    // Bounded by the 20_000 check below, so never saturates.
+                    index = index.saturating_add(1);
                     let next = cycle_step(anchor, index, cycle, eomc)?;
                     if next >= termination {
                         break;

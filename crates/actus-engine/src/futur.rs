@@ -27,6 +27,7 @@ use actus_model::{ContractRole, ContractTerms, ContractType, DeliverySettlement,
 use crate::daycount::normalize_timestamp;
 use crate::engine::ContractEngine;
 use crate::event::ContractEvent;
+use crate::num::ck;
 use crate::risk::RiskFactorProvider;
 use crate::state::{ContractState, ContractStatus};
 use crate::EngineError;
@@ -76,7 +77,7 @@ impl ContractEngine for FuturEngine {
         Ok(vec![ContractEvent {
             event_type: EventType::Maturity,
             time: maturity,
-            payoff: sign * notional * (underlying - futures_price),
+            payoff: (ck(sign) * notional * (ck(underlying) - futures_price)).get()?,
             currency: terms.currency.clone(),
             state: ContractState {
                 status_date: maturity,

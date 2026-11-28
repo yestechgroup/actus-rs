@@ -5,6 +5,7 @@ use rust_decimal::Decimal;
 
 use actus_model::DayCountConvention;
 
+use crate::num::ck;
 use crate::EngineError;
 
 /// ACTUS timestamp normalisation (techspec section "Date/Time").
@@ -81,12 +82,12 @@ pub fn day_count_fraction(
         });
     }
     let fraction = match dcc {
-        DayCountConvention::A365 => actual_over_fixed(start, end, 365),
-        DayCountConvention::A360 => actual_over_fixed(start, end, 360),
-        DayCountConvention::Aa => actual_actual(start, end),
-        DayCountConvention::ThirtyE360 => thirty_e_360(start, end, false),
-        DayCountConvention::ThirtyE360Isda => thirty_e_360(start, end, true),
-        DayCountConvention::TwentyEightE336 => twenty_eight_e_336(start, end),
+        DayCountConvention::A365 => actual_over_fixed(start, end, 365)?,
+        DayCountConvention::A360 => actual_over_fixed(start, end, 360)?,
+        DayCountConvention::Aa => actual_actual(start, end)?,
+        DayCountConvention::ThirtyE360 => thirty_e_360(start, end, false)?,
+        DayCountConvention::ThirtyE360Isda => thirty_e_360(start, end, true)?,
+        DayCountConvention::TwentyEightE336 => twenty_eight_e_336(start, end)?,
     };
     Ok(fraction)
 }
@@ -108,7 +109,7 @@ pub fn day_count_fraction_30u360(
             end: end.to_string(),
         });
     }
-    Ok(thirty_u_360(start, end))
+    thirty_u_360(start, end)
 }
 
 /// BUS/252 (business days / 252) day count fraction.
@@ -127,25 +128,33 @@ pub fn day_count_fraction_bus252(
             end: end.to_string(),
         });
     }
-    Ok(business_days_over_fixed(start, end, 252))
+    business_days_over_fixed(start, end, 252)
 }
 
-fn actual_over_fixed(start: NaiveDateTime, end: NaiveDateTime, basis: i64) -> Decimal {
+fn actual_over_fixed(
+    start: NaiveDateTime,
+    end: NaiveDateTime,
+    basis: i64,
+) -> Result<Decimal, EngineError> {
     let days = whole_days(start, end);
-    Decimal::from(days) / Decimal::from(basis)
+    (ck(Decimal::from(days)) / Decimal::from(basis)).get()
 }
 
 fn whole_days(start: NaiveDateTime, end: NaiveDateTime) -> i64 {
     end.signed_duration_since(start).num_days()
 }
 
-fn actual_actual(start: NaiveDateTime, end: NaiveDateTime) -> Decimal {
+fn actual_actual(start: NaiveDateTime, end: NaiveDateTime) -> Result<Decimal, EngineError> {
     let mut cursor = start;
-    let mut total = Decimal::ZERO;
+    let mut total = ck(Decimal::ZERO);
     while cursor < end {
         // At the last representable year there is no next January 1; the
-        // segment then simply runs to `end`.
-        let year_end = NaiveDate::from_ymd_opt(cursor.year() + 1, 1, 1)
+        // segment then simply runs to `end`. (`checked_add` covers the
+        // `i32` year itself; chrono's range ends far below `i32::MAX`.)
+        let year_end = cursor
+            .year()
+            .checked_add(1)
+            .and_then(|next| NaiveDate::from_ymd_opt(next, 1, 1))
             .map_or(end, |date| date.and_time(NaiveTime::MIN));
         let segment_end = if year_end < end { year_end } else { end };
         let days = whole_days(cursor, segment_end);
@@ -154,13 +163,17 @@ fn actual_actual(start: NaiveDateTime, end: NaiveDateTime) -> Decimal {
         } else {
             365
         };
-        total += Decimal::from(days) / Decimal::from(basis);
+        total = total + ck(Decimal::from(days)) / Decimal::from(basis);
         cursor = segment_end;
     }
-    total
+    total.get()
 }
 
-fn thirty_e_360(start: NaiveDateTime, end: NaiveDateTime, isda: bool) -> Decimal {
+fn thirty_e_360(
+    start: NaiveDateTime,
+    end: NaiveDateTime,
+    isda: bool,
+) -> Result<Decimal, EngineError> {
     let (d1, d2) = if isda {
         let d1 = if is_last_day_of_feb(start) {
             30
@@ -179,7 +192,7 @@ fn thirty_e_360(start: NaiveDateTime, end: NaiveDateTime, isda: bool) -> Decimal
     thirty_basis_fraction(start, end, d1, d2, 30, 360)
 }
 
-fn thirty_u_360(start: NaiveDateTime, end: NaiveDateTime) -> Decimal {
+fn thirty_u_360(start: NaiveDateTime, end: NaiveDateTime) -> Result<Decimal, EngineError> {
     let mut d1 = start.day();
     let mut d2 = end.day();
     if d1 == 31 {
@@ -198,34 +211,46 @@ fn thirty_basis_fraction(
     d2: u32,
     days_per_month: i64,
     basis: i64,
-) -> Decimal {
-    let month_span = i64::from(end.year() - start.year()) * 12 + i64::from(end.month())
-        - i64::from(start.month());
-    let days = month_span * days_per_month + i64::from(d2) - i64::from(d1);
-    Decimal::from(days) / Decimal::from(basis)
+) -> Result<Decimal, EngineError> {
+    // INVARIANT: chrono years lie within ±262_143, months in 1..=12 and days
+    // in 1..=31, so the month span stays below 7e6 and the day count below
+    // 3e8: none of these `i64` operations can overflow.
+    #[allow(clippy::arithmetic_side_effects)]
+    let days = {
+        let month_span = (i64::from(end.year()) - i64::from(start.year())) * 12
+            + i64::from(end.month())
+            - i64::from(start.month());
+        month_span * days_per_month + i64::from(d2) - i64::from(d1)
+    };
+    (ck(Decimal::from(days)) / Decimal::from(basis)).get()
 }
 
-fn twenty_eight_e_336(start: NaiveDateTime, end: NaiveDateTime) -> Decimal {
+fn twenty_eight_e_336(start: NaiveDateTime, end: NaiveDateTime) -> Result<Decimal, EngineError> {
     let d1 = start.day().min(28);
     let d2 = end.day().min(28);
     thirty_basis_fraction(start, end, d1, d2, 28, 336)
 }
 
-fn business_days_over_fixed(start: NaiveDateTime, end: NaiveDateTime, basis: i64) -> Decimal {
+fn business_days_over_fixed(
+    start: NaiveDateTime,
+    end: NaiveDateTime,
+    basis: i64,
+) -> Result<Decimal, EngineError> {
     let mut count: i64 = 0;
     let mut cursor = start.date();
     let last = end.date();
     while cursor < last {
         let weekday = cursor.weekday();
         if !matches!(weekday, chrono::Weekday::Sat | chrono::Weekday::Sun) {
-            count += 1;
+            // At most one per calendar day in chrono's range: no saturation.
+            count = count.saturating_add(1);
         }
         cursor = match cursor.succ_opt() {
             Some(next) => next,
             None => break,
         };
     }
-    Decimal::from(count) / Decimal::from(basis)
+    (ck(Decimal::from(count)) / Decimal::from(basis)).get()
 }
 
 fn is_last_day_of_feb(t: NaiveDateTime) -> bool {

@@ -3,6 +3,7 @@
 //! unchanged).
 
 use chrono::NaiveDateTime;
+use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 
 use actus_model::{
@@ -10,6 +11,7 @@ use actus_model::{
     InterestCalculationBase,
 };
 
+use crate::num::ck;
 use crate::schedule::{cycle_step, generate_schedule, shift_business_day, MAX_SCHEDULE_ROLLS};
 use crate::state::ContractState;
 use crate::EngineError;
@@ -80,7 +82,8 @@ pub fn anchored_series(
     let mut calc = vec![anchor];
     let mut index: u64 = 0;
     loop {
-        index += 1;
+        // Bounded by the MAX_SCHEDULE_ROLLS check below, so never saturates.
+        index = index.saturating_add(1);
         let next = roll(anchor, index, cycle, eomc)?;
         if next >= termination {
             break;
@@ -94,7 +97,8 @@ pub fn anchored_series(
         }
     }
     calc.push(termination);
-    let last = calc.len() - 1;
+    // `calc` holds at least the anchor and the termination.
+    let last = calc.len().saturating_sub(1);
     Ok(calc
         .into_iter()
         .enumerate()
@@ -226,10 +230,17 @@ pub fn term_scaling_multipliers(terms: &ContractTerms) -> (Decimal, Decimal) {
 /// The interest calculation base amount at `IED` (techspec states tables,
 /// `Ipcb`): the signed notional for `NT` semantics (the default), otherwise
 /// the signed terms amount.
-pub fn initial_base_amount(terms: &ContractTerms, notional: Decimal, sgn: Decimal) -> Decimal {
+///
+/// # Errors
+/// [`EngineError::Arithmetic`] on decimal overflow.
+pub fn initial_base_amount(
+    terms: &ContractTerms,
+    notional: Decimal,
+    sgn: Decimal,
+) -> Result<Decimal, EngineError> {
     match terms.interest_calculation_base {
-        None | Some(InterestCalculationBase::Nt) => sgn * notional,
-        Some(_) => sgn * terms.interest_calculation_base_amount.unwrap_or(notional),
+        None | Some(InterestCalculationBase::Nt) => (ck(sgn) * notional).get(),
+        Some(_) => (ck(sgn) * terms.interest_calculation_base_amount.unwrap_or(notional)).get(),
     }
 }
 
@@ -246,20 +257,38 @@ pub fn initial_base_amount(terms: &ContractTerms, notional: Decimal, sgn: Decima
 /// re-fixes the calculation base to the reduced notional. `Prnxt` is never
 /// recalculated here (nam17 pays negative redemptions while the notional
 /// grows).
+///
+/// # Errors
+/// [`EngineError::Arithmetic`] on decimal overflow.
 pub fn apply_principal_redemption(
     state: &mut ContractState,
     base_tracks_notional: bool,
-) -> Decimal {
-    let payoff = state.notional_scaling_multiplier
-        * (state.next_principal_redemption_payment - state.accrued_interest);
+) -> Result<Decimal, EngineError> {
+    let payoff = (state.notional_scaling_multiplier
+        * (ck(state.next_principal_redemption_payment) - state.accrued_interest))
+        .get()?;
     let payoff = if payoff.abs() > state.notional_principal.abs() {
         state.notional_principal
     } else {
         payoff
     };
-    state.notional_principal -= payoff;
+    state.notional_principal = (ck(state.notional_principal) - payoff).get()?;
     if base_tracks_notional {
         state.interest_calculation_base_amount = state.notional_principal;
     }
-    payoff
+    Ok(payoff)
+}
+
+/// The number of redemptions `ceil(NT / PRNXT)` that amortize the notional
+/// when no maturity date is given (techspec LAM/ANN states tables, `Md`).
+///
+/// `None` when the notional is not redeemable that way: a zero `PRNXT`
+/// never redeems it, and a negative, unrepresentable or `u64`-overflowing
+/// quotient has no redemption count. (Before checked arithmetic, a zero
+/// `PRNXT` was a division-by-zero panic.)
+pub(crate) fn redemption_count(notional: Decimal, prnxt: Decimal) -> Option<u64> {
+    if prnxt.is_zero() {
+        return None;
+    }
+    (ck(notional) / prnxt).get().ok()?.ceil().to_u64()
 }

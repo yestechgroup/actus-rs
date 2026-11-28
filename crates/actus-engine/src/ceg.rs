@@ -42,16 +42,17 @@ use actus_model::enums::FeeBasis;
 use actus_model::{
     BusinessDayConvention, Calendar, ContractReference, ContractReferenceRole,
     ContractReferenceType, ContractRole, ContractTerms, ContractType, CreditEventType,
-    DayCountConvention, EndOfMonthConvention, EventType, GuaranteedExposure,
+    DayCountConvention, EndOfMonthConvention, EventType,
 };
 
 use crate::common::stub_series;
 use crate::credit_enhancement::{
-    covered_contract_value, credit_event_trigger, maturity_date, settlement_date,
+    covered_exposure, credit_event_trigger, maturity_date, settlement_date,
 };
 use crate::daycount::{day_count_fraction, normalize_timestamp};
 use crate::engine::ContractEngine;
 use crate::event::{sort_events, ContractEvent};
+use crate::num::ck;
 use crate::risk::RiskFactorProvider;
 use crate::state::{ContractState, ContractStatus};
 use crate::EngineError;
@@ -101,34 +102,35 @@ impl ContractEngine for CegEngine {
             events.push(ContractEvent {
                 event_type: EventType::FeePayment,
                 time,
-                payoff: sign * fee,
+                payoff: (ck(sign) * fee).get()?,
                 currency: terms.currency.clone(),
-                state: event_state(sign * notional, time),
+                state: event_state((ck(sign) * notional).get()?, time),
             });
         }
 
         match trigger {
             Some(credit_event) => {
                 let coverage = terms.coverage_of_credit_enhancement.unwrap_or(Decimal::ONE);
-                let exposure = coverage
+                let exposure = (ck(coverage)
                     * covered_exposure(
                         &covered,
                         credit_event.time,
                         terms.guaranteed_exposure,
                         risk,
-                    )?;
+                    )?)
+                .get()?;
                 let settlement_time = settlement_date(terms, credit_event.time)?;
                 events.push(ContractEvent {
                     event_type: EventType::Exercise,
                     time: credit_event.time,
                     payoff: Decimal::ZERO,
                     currency: terms.currency.clone(),
-                    state: event_state(sign * exposure, credit_event.time),
+                    state: event_state((ck(sign) * exposure).get()?, credit_event.time),
                 });
                 events.push(ContractEvent {
                     event_type: EventType::Settlement,
                     time: settlement_time,
-                    payoff: sign * exposure,
+                    payoff: (ck(sign) * exposure).get()?,
                     currency: terms.currency.clone(),
                     state: terminal_state(
                         Decimal::ZERO,
@@ -177,19 +179,6 @@ fn ceg_role_sign(role: Option<ContractRole>) -> Decimal {
     }
 }
 
-/// The aggregated guaranteed exposure `sum(n_i)` at `at`, before coverage.
-fn covered_exposure(
-    covered: &[&ContractReference],
-    at: NaiveDateTime,
-    basis: Option<GuaranteedExposure>,
-    risk: &dyn RiskFactorProvider,
-) -> Result<Decimal, EngineError> {
-    covered
-        .iter()
-        .map(|reference| covered_contract_value(reference, at, basis, risk))
-        .sum()
-}
-
 /// The fee schedule `(emission time, guaranteed notional, fee amount)`
 /// triplets (techspec `FP`: `R(CNTRL) x FER x NT x Y` per `FEB`).
 ///
@@ -234,7 +223,7 @@ fn fee_schedule(
         let year_fraction = day_count_fraction(previous, calc, dcc)?;
         let fee = match basis {
             Some(FeeBasis::AbsoluteValue) => fee_rate,
-            _ => fee_rate * notional * year_fraction,
+            _ => (ck(fee_rate) * notional * year_fraction).get()?,
         };
         schedule.push((emit, notional, fee));
         previous = calc;
@@ -265,6 +254,7 @@ mod tests {
     use crate::risk::ObservedCreditEvent;
     use crate::risk::StateProvider;
     use actus_model::ContractPerformance;
+    use actus_model::GuaranteedExposure;
     use chrono::NaiveDateTime;
     use rust_decimal_macros::dec;
     use serde_json::json;

@@ -1,0 +1,4 @@
+# `Ck` (actus-engine/src/num.rs) is the checked-arithmetic type: its
+# operators cannot panic, they record the failure for `Ck::get`. Clippy
+# matches the path as written inside actus-engine, hence `num::Ck`.
+arithmetic-side-effects-allowed = ["num::Ck"]

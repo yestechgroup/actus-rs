@@ -45,6 +45,7 @@ use actus_model::{ContractTerms, ContractType, EventType};
 use crate::daycount::normalize_timestamp;
 use crate::engine::ContractEngine;
 use crate::event::{sequence_rank, ContractEvent};
+use crate::num::ck;
 use crate::risk::RiskFactorProvider;
 use crate::state::{ContractState, ContractStatus};
 use crate::ump::position_sign;
@@ -145,18 +146,18 @@ impl ContractEngine for FxoutEngine {
         slots.sort_by_key(|slot| (slot.time, slot.kind.priority()));
 
         let mut state = ContractState::initial(terms);
-        state.notional_principal = sgn * notional;
+        state.notional_principal = (ck(sgn) * notional).get()?;
         let mut events = Vec::new();
         for slot in slots {
             let payoff = match slot.kind {
                 Kind::InitialExchange => {
-                    -sgn * terms.premium_discount_at_ied.unwrap_or(Decimal::ZERO)
+                    (-ck(sgn) * terms.premium_discount_at_ied.unwrap_or(Decimal::ZERO)).get()?
                 }
                 Kind::Purchase => {
                     let price = terms
                         .price_at_purchase_date
                         .ok_or(EngineError::MissingAttribute("priceAtPurchaseDate"))?;
-                    -sgn * price
+                    (-ck(sgn) * price).get()?
                 }
                 Kind::Termination => {
                     let price = terms
@@ -165,11 +166,11 @@ impl ContractEngine for FxoutEngine {
                     state.notional_principal = Decimal::ZERO;
                     state.fee_accrued = Decimal::ZERO;
                     state.contract_status = ContractStatus::Terminated;
-                    sgn * price
+                    (ck(sgn) * price).get()?
                 }
                 Kind::Maturity => {
-                    let payoff =
-                        sgn * (notional - settlement_rate(terms, risk, maturity)? * notional2);
+                    let rate = settlement_rate(terms, risk, maturity)?;
+                    let payoff = (ck(sgn) * (ck(notional) - ck(rate) * notional2)).get()?;
                     state.notional_principal = Decimal::ZERO;
                     state.fee_accrued = Decimal::ZERO;
                     state.contract_status = ContractStatus::Matured;
@@ -216,7 +217,7 @@ fn settlement_rate(
             code,
             at: maturity.to_string(),
         })?;
-    Ok(agreed / notional2)
+    (ck(agreed) / notional2).get()
 }
 
 #[cfg(test)]

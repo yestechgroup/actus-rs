@@ -1,0 +1,68 @@
+name: Fuzz
+# Nightly, not on every push: coverage-guided fuzzing of the WASM JSON entry
+# points for a fixed time per target. The stable twin of this property runs
+# on every push (crates/actus-testgen/tests/never_panics.rs).
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "Seconds per target"
+        default: "900"
+
+concurrency:
+  group: fuzz
+  cancel-in-progress: false
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [terms_structured, json_raw]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            fuzz -> target
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - name: Restore the corpus from earlier runs
+        uses: actions/cache/restore@v4
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+      - name: Seed the corpus (testbeds, Explorer defaults, seeds/*.json)
+        run: fuzz/seed-corpus.sh
+      - name: Fuzz
+        working-directory: fuzz
+        run: |
+          cargo +nightly fuzz run ${{ matrix.target }} -- \
+            -max_total_time=${{ inputs.seconds || '900' }} \
+            -timeout=10 -rss_limit_mb=2048 -max_len=8192 \
+            2>&1 | tee fuzz.log
+          grep -E '^Done [0-9]+ runs' fuzz.log >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Minimise the corpus
+        if: always()
+        working-directory: fuzz
+        run: cargo +nightly fuzz cmin ${{ matrix.target }}
+      - name: Save the corpus
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+      - name: Upload crash and timeout inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: ignore

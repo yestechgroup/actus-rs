@@ -51,6 +51,7 @@ use crate::common::{calculate_first, role_sign, stub_series};
 use crate::daycount::{day_count_fraction, normalize_timestamp};
 use crate::engine::ContractEngine;
 use crate::event::{sequence_rank, ContractEvent};
+use crate::num::ck;
 use crate::risk::RiskFactorProvider;
 use crate::schedule::{cycle_step, shift_business_day};
 use crate::state::{ContractState, ContractStatus};
@@ -123,7 +124,7 @@ impl ContractEngine for ClmEngine {
             .ok_or(EngineError::MissingAttribute("notionalPrincipal"))?;
         let ctx = Context::new(terms, risk)?;
         let mut state = if ctx.progressed {
-            ctx.progressed_initial(terms, notional)
+            ctx.progressed_initial(terms, notional)?
         } else {
             ContractState::initial(terms)
         };
@@ -421,7 +422,8 @@ impl Context {
         let mut rolls = vec![anchor];
         let mut index: u64 = 0;
         loop {
-            index += 1;
+            // Bounded by the 20_000 check below, so never saturates.
+            index = index.saturating_add(1);
             let next = cycle_step(anchor, index, cycle, self.eomc)?;
             if next >= end {
                 break;
@@ -450,12 +452,16 @@ impl Context {
     /// before the status date: the raw terms states without progression
     /// accrual, because every schedule point at or before `t0` is dropped
     /// without carrying its capitalization forward (testbed clm03, clm04).
-    fn progressed_initial(&self, terms: &ContractTerms, notional: Decimal) -> ContractState {
+    fn progressed_initial(
+        &self,
+        terms: &ContractTerms,
+        notional: Decimal,
+    ) -> Result<ContractState, EngineError> {
         let mut state = ContractState::initial(terms);
-        state.notional_principal = self.sgn * notional;
+        state.notional_principal = (ck(self.sgn) * notional).get()?;
         state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
         state.accrued_interest = terms.accrued_interest.unwrap_or(Decimal::ZERO);
-        state
+        Ok(state)
     }
 
     /// Applies the state transition and payoff function of one slot
@@ -470,22 +476,26 @@ impl Context {
         settlement: &mut Option<Decimal>,
     ) -> Result<Decimal, EngineError> {
         let y = day_count_fraction(state.status_date, slot.calc, self.dcc)?;
-        let accrual = y * state.nominal_interest_rate * state.notional_principal;
+        let accrual = (ck(y) * state.nominal_interest_rate * state.notional_principal).get()?;
         let payoff = match slot.kind {
             Kind::InitialExchange => {
-                state.notional_principal = self.sgn * terms.notional_principal.unwrap_or(accrual);
+                state.notional_principal =
+                    (ck(self.sgn) * terms.notional_principal.unwrap_or(accrual)).get()?;
                 state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
                 state.accrued_interest = terms.accrued_interest.unwrap_or(Decimal::ZERO);
                 let premium = terms.premium_discount_at_ied.unwrap_or(Decimal::ZERO);
-                self.sgn * -(terms.notional_principal.unwrap_or_default() + premium)
+                (ck(self.sgn) * -(ck(terms.notional_principal.unwrap_or_default()) + premium))
+                    .get()?
             }
             Kind::InterestCapitalization => {
-                state.notional_principal += state.accrued_interest + accrual;
+                state.notional_principal = (ck(state.notional_principal)
+                    + (ck(state.accrued_interest) + accrual))
+                    .get()?;
                 state.accrued_interest = Decimal::ZERO;
                 Decimal::ZERO
             }
             Kind::RateReset | Kind::RateResetFixed => {
-                state.accrued_interest += accrual;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 state.nominal_interest_rate = match slot.kind {
                     Kind::RateResetFixed => terms
                         .next_reset_rate
@@ -503,13 +513,13 @@ impl Context {
                                 })?;
                         let multiplier = terms.rate_multiplier.unwrap_or(Decimal::ONE);
                         let spread = terms.rate_spread.unwrap_or(Decimal::ZERO);
-                        observed * multiplier + spread
+                        (ck(observed) * multiplier + spread).get()?
                     }
                 };
                 Decimal::ZERO
             }
             Kind::Exercise => {
-                let total = state.accrued_interest + accrual;
+                let total = (ck(state.accrued_interest) + accrual).get()?;
                 *settlement = Some(total);
                 state.accrued_interest = if self.same_day_settlement {
                     total
@@ -523,15 +533,17 @@ impl Context {
                     let frozen = settlement.take().ok_or_else(|| {
                         EngineError::InvalidTransition("no called accrual".into())
                     })?;
-                    state.interest_scaling_multiplier * frozen
+                    (ck(state.interest_scaling_multiplier) * frozen).get()?
                 } else {
-                    state.interest_scaling_multiplier * (state.accrued_interest + accrual)
+                    (state.interest_scaling_multiplier * (ck(state.accrued_interest) + accrual))
+                        .get()?
                 };
                 state.accrued_interest = Decimal::ZERO;
                 payoff
             }
             Kind::Settlement => {
-                let payoff = state.notional_scaling_multiplier * state.notional_principal;
+                let payoff =
+                    (ck(state.notional_scaling_multiplier) * state.notional_principal).get()?;
                 state.notional_principal = Decimal::ZERO;
                 state.accrued_interest = Decimal::ZERO;
                 state.fee_accrued = Decimal::ZERO;
@@ -539,9 +551,10 @@ impl Context {
                 payoff
             }
             Kind::Maturity => {
-                let payoff = state.notional_scaling_multiplier * state.notional_principal
-                    + state.interest_scaling_multiplier * state.accrued_interest
-                    + state.fee_accrued;
+                let payoff = (ck(state.notional_scaling_multiplier) * state.notional_principal
+                    + ck(state.interest_scaling_multiplier) * state.accrued_interest
+                    + state.fee_accrued)
+                    .get()?;
                 state.notional_principal = Decimal::ZERO;
                 state.accrued_interest = Decimal::ZERO;
                 state.fee_accrued = Decimal::ZERO;

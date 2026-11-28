@@ -6,7 +6,10 @@ members = [
     "crates/actus-conformance",
     "crates/actus-wasm",
     "crates/actus-web",
+    "crates/actus-testgen",
 ]
+# cargo-fuzz targets build on nightly with their own workspace.
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0"
