@@ -35,37 +35,49 @@ pub struct ContractEvent {
 /// event dictionary: [`sequence_rank`]. Events are ordered by
 /// `(time, sequence_rank)`; equal keys keep insertion order (stable sort), so
 /// the ordering is a deterministic total order for any event list.
+///
+/// [`crate::EngineRegistry::evaluate`] orders with the engine's own rank
+/// ([`crate::ContractEngine::sequence_rank`]), which differs from this one
+/// only for CLM ([`call_money_sequence_rank`]).
 pub fn sort_events(events: &mut [ContractEvent]) {
     events.sort_by_key(|e| (e.time, sequence_rank(e.event_type)));
 }
 
 /// The effective same-timestamp sequence rank of an event type.
 ///
-/// These are the [`EventType::priority`] dictionary values with two
-/// deviations resolved against the official testbeds:
-///
-/// - The annuity principal fixing `PRF` evaluates after the same-timestamp
-///   rate reset. The v1.4 dictionary assigns `PRF` sequence 5, but every ANN
-///   fixture with a rate reset orders the same-day events
-///   `PR, IP, RR/RRF, PRF` (ann15, ann16), because the fixing recalculates
-///   `PRNXT` from the rate the reset has just set. The rank places `PRF`
-///   directly after `RR`.
-/// - The call money exercise notice `XD` evaluates before the same-timestamp
-///   interest payment. The v1.4 dictionary assigns `XD` sequence 20, but the
-///   CLM reference implementation emits the terminal call settlement in the
-///   order `XD, IP, STD` at the shared settlement timestamp (clm09, clm13,
-///   clm14), because the notice freezes the accrual the interest payment
-///   then carries. The rank places `XD` directly before `IP`; no other
-///   contract family emits `XD`.
+/// These are the [`EventType::priority`] dictionary values with one
+/// deviation resolved against the official testbeds: the annuity principal
+/// fixing `PRF` evaluates after the same-timestamp rate reset. The v1.4
+/// dictionary assigns `PRF` sequence 5, but every ANN fixture with a rate
+/// reset orders the same-day events `PR, IP, RR/RRF, PRF` (ann15, ann16),
+/// because the fixing recalculates `PRNXT` from the rate the reset has just
+/// set. The rank places `PRF` directly after `RR`.
 pub fn sequence_rank(event_type: EventType) -> u8 {
     match event_type {
-        // Dictionary sequence numbers are small (1..=25), so neither the
-        // increment nor the decrement can saturate.
+        // Dictionary sequence numbers are small (1..=25), so the increment
+        // cannot saturate.
         EventType::PrincipalPaymentAmountFixing => {
             EventType::RateResetVariable.priority().saturating_add(1)
         }
-        EventType::Exercise => EventType::InterestPayment.priority().saturating_sub(1),
         other => other.priority(),
+    }
+}
+
+/// The CLM sequence rank: [`sequence_rank`], with the call money exercise
+/// notice `XD` before the same-timestamp interest payment.
+///
+/// The v1.4 dictionary assigns `XD` sequence 20, but the CLM reference
+/// implementation emits the terminal call settlement in the order
+/// `XD, IP, STD` at the shared settlement timestamp (clm09, clm13, clm14),
+/// because the notice freezes the accrual the interest payment then
+/// carries. The rank places `XD` directly before `IP`. The other types that
+/// emit `XD` follow the dictionary: OPTNS and FUTUR report `MD, XD, STD`
+/// (option01, future01), CEG and CEC `XD, STD`.
+pub fn call_money_sequence_rank(event_type: EventType) -> u8 {
+    match event_type {
+        // IP has dictionary sequence 8, so the decrement cannot saturate.
+        EventType::Exercise => EventType::InterestPayment.priority().saturating_sub(1),
+        other => sequence_rank(other),
     }
 }
 
@@ -87,6 +99,24 @@ mod tests {
             payoff,
             currency: Some("USD".to_string()),
             state: ContractState::default(),
+        }
+    }
+
+    /// CLM orders its call notice before the interest payment (clm09);
+    /// every other type keeps the dictionary's `MD, XD, STD` (option01).
+    #[test]
+    fn only_call_money_moves_the_exercise_before_interest() {
+        let ip = EventType::InterestPayment;
+        let xd = EventType::Exercise;
+        assert!(call_money_sequence_rank(xd) < call_money_sequence_rank(ip));
+        assert!(sequence_rank(ip) < sequence_rank(xd));
+        assert!(sequence_rank(EventType::Maturity) < sequence_rank(xd));
+        assert!(sequence_rank(xd) < sequence_rank(EventType::Settlement));
+        for event_type in EventType::ALL.iter().copied().filter(|e| *e != xd) {
+            assert_eq!(
+                call_money_sequence_rank(event_type),
+                sequence_rank(event_type)
+            );
         }
     }
 
