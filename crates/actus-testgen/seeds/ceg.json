@@ -1,0 +1,255 @@
+[
+ {
+  "name": "fees-no-trigger-buyer",
+  "terms": {
+   "contractType": "CEG",
+   "contractID": "ceg01",
+   "contractRole": "BUY",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "maturityDate": "2026-01-01T00:00:00",
+   "coverageOfCreditEnhancement": "1.0",
+   "guaranteedExposure": "NO",
+   "creditEventTypeCovered": "DF",
+   "feeRate": "0.005",
+   "feeBasis": "N",
+   "cycleAnchorDateOfFee": "2025-01-01T00:00:00",
+   "cycleOfFee": "P3ML0",
+   "settlementPeriod": "P0D",
+   "dayCountConvention": "30E360",
+   "contractStructure": [
+    {
+     "object": {
+      "contractType": "PAM",
+      "statusDate": "2025-01-01T00:00:00",
+      "contractDealDate": "2025-01-01T00:00:00",
+      "currency": "USD",
+      "notionalPrincipal": "1000000",
+      "initialExchangeDate": "2025-01-01T00:00:00",
+      "maturityDate": "2026-01-01T00:00:00",
+      "nominalInterestRate": "0.03",
+      "cycleAnchorDateOfInterestPayment": "2025-01-01T00:00:00",
+      "cycleOfInterestPayment": "P3ML0",
+      "dayCountConvention": "30E360",
+      "contractRole": "RPA",
+      "contractID": "loan01"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "COVE"
+    },
+    {
+     "object": {
+      "contractType": "PAM",
+      "statusDate": "2025-01-01T00:00:00",
+      "contractDealDate": "2025-01-01T00:00:00",
+      "currency": "USD",
+      "notionalPrincipal": "1000000",
+      "initialExchangeDate": "2025-01-01T00:00:00",
+      "maturityDate": "2026-01-01T00:00:00",
+      "nominalInterestRate": "0.03",
+      "cycleAnchorDateOfInterestPayment": "2025-01-01T00:00:00",
+      "cycleOfInterestPayment": "P3ML0",
+      "dayCountConvention": "30E360",
+      "contractRole": "RPA",
+      "contractID": "loan02"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "COVE"
+    }
+   ]
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "fees-no-trigger-seller",
+  "terms": {
+   "contractType": "CEG",
+   "contractID": "ceg01",
+   "contractRole": "SEL",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "maturityDate": "2026-01-01T00:00:00",
+   "coverageOfCreditEnhancement": "1.0",
+   "guaranteedExposure": "NO",
+   "creditEventTypeCovered": "DF",
+   "feeRate": "0.005",
+   "feeBasis": "N",
+   "cycleAnchorDateOfFee": "2025-01-01T00:00:00",
+   "cycleOfFee": "P3ML0",
+   "settlementPeriod": "P0D",
+   "dayCountConvention": "30E360",
+   "contractStructure": [
+    {
+     "object": {
+      "contractType": "PAM",
+      "statusDate": "2025-01-01T00:00:00",
+      "contractDealDate": "2025-01-01T00:00:00",
+      "currency": "USD",
+      "notionalPrincipal": "1000000",
+      "initialExchangeDate": "2025-01-01T00:00:00",
+      "maturityDate": "2026-01-01T00:00:00",
+      "nominalInterestRate": "0.03",
+      "cycleAnchorDateOfInterestPayment": "2025-01-01T00:00:00",
+      "cycleOfInterestPayment": "P3ML0",
+      "dayCountConvention": "30E360",
+      "contractRole": "RPA",
+      "contractID": "loan01"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "COVE"
+    },
+    {
+     "object": {
+      "contractType": "PAM",
+      "statusDate": "2025-01-01T00:00:00",
+      "contractDealDate": "2025-01-01T00:00:00",
+      "currency": "USD",
+      "notionalPrincipal": "1000000",
+      "initialExchangeDate": "2025-01-01T00:00:00",
+      "maturityDate": "2026-01-01T00:00:00",
+      "nominalInterestRate": "0.03",
+      "cycleAnchorDateOfInterestPayment": "2025-01-01T00:00:00",
+      "cycleOfInterestPayment": "P3ML0",
+      "dayCountConvention": "30E360",
+      "contractRole": "RPA",
+      "contractID": "loan02"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "COVE"
+    }
+   ]
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "default-trigger-unidentified-child",
+  "terms": {
+   "contractType": "CEG",
+   "contractID": "ceg01",
+   "contractRole": "BUY",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "maturityDate": "2026-01-01T00:00:00",
+   "coverageOfCreditEnhancement": "1.0",
+   "guaranteedExposure": "NO",
+   "creditEventTypeCovered": "DF",
+   "feeRate": "0.005",
+   "feeBasis": "N",
+   "cycleAnchorDateOfFee": "2025-01-01T00:00:00",
+   "cycleOfFee": "P3ML0",
+   "settlementPeriod": "P0D",
+   "dayCountConvention": "30E360",
+   "contractStructure": [
+    {
+     "object": {
+      "contractType": "PAM",
+      "statusDate": "2025-01-01T00:00:00",
+      "contractDealDate": "2025-01-01T00:00:00",
+      "currency": "USD",
+      "notionalPrincipal": "1000000",
+      "initialExchangeDate": "2025-01-01T00:00:00",
+      "maturityDate": "2026-01-01T00:00:00",
+      "nominalInterestRate": "0.03",
+      "cycleAnchorDateOfInterestPayment": "2025-01-01T00:00:00",
+      "cycleOfInterestPayment": "P3ML0",
+      "dayCountConvention": "30E360",
+      "contractRole": "RPA"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "COVE"
+    }
+   ]
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": [
+    {
+     "time": "2025-09-20T00:00:00",
+     "performance": "DF"
+    }
+   ]
+  }
+ },
+ {
+  "name": "absolute-fee-ni-exposure",
+  "terms": {
+   "contractType": "CEG",
+   "contractID": "ceg01",
+   "contractRole": "BUY",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "maturityDate": "2026-01-01T00:00:00",
+   "coverageOfCreditEnhancement": "0.5",
+   "guaranteedExposure": "NI",
+   "creditEventTypeCovered": "DF",
+   "feeRate": "1000",
+   "feeBasis": "A",
+   "cycleAnchorDateOfFee": "2025-01-01T00:00:00",
+   "cycleOfFee": "P3ML0",
+   "settlementPeriod": "P5D",
+   "dayCountConvention": "30E360",
+   "contractStructure": [
+    {
+     "object": {
+      "contractType": "PAM",
+      "statusDate": "2025-01-01T00:00:00",
+      "contractDealDate": "2025-01-01T00:00:00",
+      "currency": "USD",
+      "notionalPrincipal": "1000000",
+      "initialExchangeDate": "2025-01-01T00:00:00",
+      "maturityDate": "2026-01-01T00:00:00",
+      "nominalInterestRate": "0.03",
+      "cycleAnchorDateOfInterestPayment": "2025-01-01T00:00:00",
+      "cycleOfInterestPayment": "P3ML0",
+      "dayCountConvention": "30E360",
+      "contractRole": "RPA",
+      "contractID": "loan01"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "COVE"
+    },
+    {
+     "object": {
+      "contractType": "PAM",
+      "statusDate": "2025-01-01T00:00:00",
+      "contractDealDate": "2025-01-01T00:00:00",
+      "currency": "USD",
+      "notionalPrincipal": "1000000",
+      "initialExchangeDate": "2025-01-01T00:00:00",
+      "maturityDate": "2026-01-01T00:00:00",
+      "nominalInterestRate": "0.03",
+      "cycleAnchorDateOfInterestPayment": "2025-01-01T00:00:00",
+      "cycleOfInterestPayment": "P3ML0",
+      "dayCountConvention": "30E360",
+      "contractRole": "RPA",
+      "contractID": "loan02"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "COVE"
+    }
+   ]
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ }
+]

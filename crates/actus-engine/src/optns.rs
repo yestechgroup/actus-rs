@@ -33,11 +33,13 @@ use chrono::NaiveDateTime;
 use rust_decimal::Decimal;
 
 use actus_model::enums::{OptionExerciseType, OptionType};
-use actus_model::{ContractRole, ContractTerms, ContractType, EventType};
+use actus_model::{ContractTerms, ContractType, EventType};
 
+use crate::common::contract_role_sign;
 use crate::daycount::normalize_timestamp;
 use crate::engine::ContractEngine;
 use crate::event::ContractEvent;
+use crate::num::ck;
 use crate::risk::RiskFactorProvider;
 use crate::state::{ContractState, ContractStatus};
 use crate::EngineError;
@@ -57,7 +59,7 @@ impl ContractEngine for OptnsEngine {
         terms: &ContractTerms,
         risk: &dyn RiskFactorProvider,
     ) -> Result<Vec<ContractEvent>, EngineError> {
-        let sign = role_sign(terms.contract_role);
+        let sign = contract_role_sign(terms.contract_role);
         let maturity = terms
             .maturity_date
             .or(terms.option_exercise_end_date)
@@ -90,9 +92,9 @@ impl ContractEngine for OptnsEngine {
             events.push(ContractEvent {
                 event_type: EventType::InitialExchange,
                 time: ied,
-                payoff: -sign * premium,
+                payoff: (-ck(sign) * premium).get()?,
                 currency: terms.currency.clone(),
-                state: event_state(sign * premium, ied, ContractStatus::Active),
+                state: event_state((ck(sign) * premium).get()?, ied, ContractStatus::Active),
             });
         }
 
@@ -109,7 +111,7 @@ impl ContractEngine for OptnsEngine {
 
         let observation_time = exercise.unwrap_or(maturity);
         let payoff =
-            match intrinsic_value(terms, risk, option_type, notional, strike, observation_time) {
+            match intrinsic_value(terms, risk, option_type, notional, strike, observation_time)? {
                 Some(value) => value,
                 None => {
                     return Err(EngineError::RiskFactorMissing {
@@ -121,7 +123,7 @@ impl ContractEngine for OptnsEngine {
         events.push(ContractEvent {
             event_type: EventType::Maturity,
             time: maturity,
-            payoff: sign * payoff,
+            payoff: (ck(sign) * payoff).get()?,
             currency: terms.currency.clone(),
             state: event_state(Decimal::ZERO, maturity, ContractStatus::Matured),
         });
@@ -142,41 +144,33 @@ fn intrinsic_value(
     notional: Decimal,
     strike: Decimal,
     at: NaiveDateTime,
-) -> Option<Decimal> {
+) -> Result<Option<Decimal>, EngineError> {
     if let Some(code) = terms.market_object_code.as_deref() {
         if let Some(underlying) = risk.index(code, at) {
             let direction = match option_type {
                 OptionType::Call => Decimal::ONE,
                 OptionType::Put => -Decimal::ONE,
                 OptionType::CallPut => {
-                    return Some(notional * call_put_intrinsic(underlying, strike))
+                    let intrinsic = call_put_intrinsic(underlying, strike)?;
+                    return Ok(Some((ck(notional) * intrinsic).get()?));
                 }
             };
-            let intrinsic = (direction * (underlying - strike)).max(Decimal::ZERO);
-            return Some(notional * intrinsic);
+            let intrinsic = (ck(direction) * (ck(underlying) - strike))
+                .get()?
+                .max(Decimal::ZERO);
+            return Ok(Some((ck(notional) * intrinsic).get()?));
         }
     }
-    terms.exercise_amount
+    Ok(terms.exercise_amount)
 }
 
 /// The intrinsic value of a call/put combination: long the call strike and
 /// the put strike (`OPS1`/`OPS2`, dictionary: strike price and put price of
 /// the call/put).
-fn call_put_intrinsic(underlying: Decimal, strike: Decimal) -> Decimal {
-    (underlying - strike).max(Decimal::ZERO) + (strike - underlying).max(Decimal::ZERO)
-}
-
-/// The contract role sign of the option holder (dictionary Table 1): short
-/// positions carry `-1`, long/buyer positions carry `+1`.
-fn role_sign(role: Option<ContractRole>) -> Decimal {
-    match role {
-        Some(ContractRole::Rpl)
-        | Some(ContractRole::Rf)
-        | Some(ContractRole::Pf)
-        | Some(ContractRole::Sel)
-        | Some(ContractRole::Udlm) => -Decimal::ONE,
-        _ => Decimal::ONE,
-    }
+fn call_put_intrinsic(underlying: Decimal, strike: Decimal) -> Result<Decimal, EngineError> {
+    let call = (ck(underlying) - strike).get()?.max(Decimal::ZERO);
+    let put = (ck(strike) - underlying).get()?.max(Decimal::ZERO);
+    (ck(call) + put).get()
 }
 
 /// Builds a post-event state carrying the given notional at the event time.
@@ -193,6 +187,7 @@ fn event_state(notional: Decimal, time: NaiveDateTime, status: ContractStatus) -
 mod tests {
     use super::*;
     use crate::risk::StateProvider;
+    use actus_model::ContractRole;
     use rust_decimal_macros::dec;
     use serde_json::json;
 

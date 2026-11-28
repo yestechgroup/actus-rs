@@ -17,10 +17,11 @@ use crate::daycount::{day_count_fraction, normalize_timestamp};
 use crate::engine::EngineRegistry;
 use crate::lam::LamEngine;
 use crate::nam::NamEngine;
+use crate::num::{self, ck};
 use crate::pam::PamEngine;
 use crate::risk::{ObservedCreditEvent, RiskFactorProvider};
 use crate::schedule::{cycle_step, shift_business_day};
-use crate::state::ContractState;
+use crate::state::{ContractState, ContractStatus};
 use crate::EngineError;
 
 /// The engines a covered child may route through.
@@ -88,12 +89,31 @@ pub(crate) fn credit_event_trigger(
         .min_by_key(|event| event.time)
 }
 
+/// The covered exposure `sum(n_i)` at `at`, before coverage (techspec CEG
+/// and CEC states tables, `Nt` initialisation).
+///
+/// Each covered contract is evaluated under its own contract role through
+/// its own engine; the parent role sign is applied by the caller after
+/// aggregation.
+pub(crate) fn covered_exposure(
+    covered: &[&ContractReference],
+    at: NaiveDateTime,
+    basis: Option<GuaranteedExposure>,
+    risk: &dyn RiskFactorProvider,
+) -> Result<Decimal, EngineError> {
+    let values = covered
+        .iter()
+        .map(|reference| covered_contract_value(reference, at, basis, risk))
+        .collect::<Result<Vec<Decimal>, EngineError>>()?;
+    num::sum(values)
+}
+
 /// The guaranteed value `n_i` of one covered contract at `at`.
 ///
 /// `NO` guarantees the notional state the child's last event at or before
 /// `at` reports; `NI` adds the interest accrued from that event's status
 /// date to `at`; `MV` reads the child's own market value observation.
-pub(crate) fn covered_contract_value(
+fn covered_contract_value(
     reference: &ContractReference,
     at: NaiveDateTime,
     basis: Option<GuaranteedExposure>,
@@ -124,7 +144,7 @@ pub(crate) fn covered_contract_value(
         .unwrap_or_else(|| ContractState::initial(&child_terms));
     match basis {
         Some(GuaranteedExposure::NominalValuePlusInterest) => {
-            Ok(state.notional_principal + projected_accrued(&state, at, &child_terms)?)
+            (ck(state.notional_principal) + projected_accrued(&state, at, &child_terms)?).get()
         }
         _ => Ok(state.notional_principal),
     }
@@ -151,7 +171,7 @@ pub(crate) fn projected_accrued(
     } else {
         state.interest_calculation_base_amount
     };
-    Ok(state.accrued_interest + year_fraction * state.nominal_interest_rate * base)
+    (ck(state.accrued_interest) + ck(year_fraction) * state.nominal_interest_rate * base).get()
 }
 
 /// The settlement date: the credit event time plus `settlementPeriod`
@@ -211,5 +231,27 @@ pub(crate) fn add_period(
             Ok(cycle_step(at, 1, &cycle, eomc)?)
         }
         _ => Err(invalid()),
+    }
+}
+
+/// A post-event state carrying the given notional at the event time.
+pub(crate) fn event_state(notional: Decimal, time: NaiveDateTime) -> ContractState {
+    ContractState {
+        notional_principal: notional,
+        status_date: time,
+        ..ContractState::default()
+    }
+}
+
+/// A terminal post-event state with an explicit lifetime status (`MD`
+/// matures, a settled credit event terminates).
+pub(crate) fn terminal_state(
+    notional: Decimal,
+    time: NaiveDateTime,
+    status: ContractStatus,
+) -> ContractState {
+    ContractState {
+        contract_status: status,
+        ..event_state(notional, time)
     }
 }

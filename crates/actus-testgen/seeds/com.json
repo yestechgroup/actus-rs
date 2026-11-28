@@ -1,0 +1,102 @@
+[
+ {
+  "name": "buy-and-sell",
+  "terms": {
+   "contractType": "COM",
+   "contractID": "com01",
+   "contractRole": "RPA",
+   "statusDate": "2016-01-01T00:00:00",
+   "purchaseDate": "2016-01-15T00:00:00",
+   "quantity": "100",
+   "unit": "BRL",
+   "priceAtPurchaseDate": "50",
+   "priceAtTerminationDate": "52",
+   "terminationDate": "2016-06-15T00:00:00",
+   "currency": "USD"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "short-position",
+  "terms": {
+   "contractType": "COM",
+   "contractID": "com01",
+   "contractRole": "RPL",
+   "statusDate": "2016-01-01T00:00:00",
+   "purchaseDate": "2016-01-15T00:00:00",
+   "quantity": "100",
+   "unit": "BRL",
+   "priceAtPurchaseDate": "50",
+   "priceAtTerminationDate": "52",
+   "terminationDate": "2016-06-15T00:00:00",
+   "currency": "USD"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "market-priced-sale",
+  "terms": {
+   "contractType": "COM",
+   "contractID": "com01",
+   "contractRole": "RPA",
+   "statusDate": "2016-01-01T00:00:00",
+   "purchaseDate": "2016-01-15T00:00:00",
+   "quantity": "100",
+   "unit": "ONC",
+   "priceAtPurchaseDate": "50",
+   "priceAtTerminationDate": "52",
+   "terminationDate": "2016-06-15T00:00:00",
+   "currency": "USD",
+   "marketObjectCode": "GOLD"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {
+    "GOLD": {
+     "2016-06-01T00:00:00": "1300"
+    }
+   },
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "dividend-terms-ignored",
+  "terms": {
+   "contractType": "COM",
+   "contractID": "com01",
+   "contractRole": "RPA",
+   "statusDate": "2016-01-01T00:00:00",
+   "purchaseDate": "2016-01-15T00:00:00",
+   "quantity": "100",
+   "unit": "BRL",
+   "priceAtPurchaseDate": "50",
+   "priceAtTerminationDate": "52",
+   "terminationDate": "2016-06-15T00:00:00",
+   "currency": "USD",
+   "cycleAnchorDateOfDividend": "2016-03-15T00:00:00",
+   "cycleOfDividend": "P1ML1",
+   "nextDividendPaymentAmount": "2.5"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ }
+]

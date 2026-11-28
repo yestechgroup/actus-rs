@@ -85,7 +85,7 @@ impl ContractEngine for SwppvEngine {
         let mut stream = evaluate_leg(&first, leg_role(parent_sign, true), risk)?;
         stream.extend(evaluate_leg(&second, leg_role(parent_sign, false), risk)?);
         sort_events(&mut stream);
-        let merged = merge_congruent(terms, stream);
+        let merged = merge_congruent(terms, stream)?;
         Ok(merged)
     }
 }

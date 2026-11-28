@@ -59,8 +59,12 @@ pub fn sort_events(events: &mut [ContractEvent]) {
 ///   contract family emits `XD`.
 pub fn sequence_rank(event_type: EventType) -> u8 {
     match event_type {
-        EventType::PrincipalPaymentAmountFixing => EventType::RateResetVariable.priority() + 1,
-        EventType::Exercise => EventType::InterestPayment.priority() - 1,
+        // Dictionary sequence numbers are small (1..=25), so neither the
+        // increment nor the decrement can saturate.
+        EventType::PrincipalPaymentAmountFixing => {
+            EventType::RateResetVariable.priority().saturating_add(1)
+        }
+        EventType::Exercise => EventType::InterestPayment.priority().saturating_sub(1),
         other => other.priority(),
     }
 }

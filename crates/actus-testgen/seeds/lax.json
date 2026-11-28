@@ -1,0 +1,209 @@
+[
+ {
+  "name": "scalar-lam-shape",
+  "terms": {
+   "contractType": "LAX",
+   "contractID": "lax01",
+   "contractRole": "RPA",
+   "statusDate": "2012-12-30T00:00:00",
+   "initialExchangeDate": "2013-01-01T00:00:00",
+   "maturityDate": "2013-11-01T00:00:00",
+   "notionalPrincipal": "5000",
+   "nominalInterestRate": "0.08",
+   "cycleAnchorDateOfPrincipalRedemption": "2013-02-01T00:00:00",
+   "cycleOfPrincipalRedemption": "P1ML0",
+   "nextPrincipalRedemptionPayment": "500",
+   "cycleAnchorDateOfInterestPayment": "2013-02-01T00:00:00",
+   "cycleOfInterestPayment": "P1ML0",
+   "dayCountConvention": "A365",
+   "interestCalculationBase": "NT",
+   "currency": "USD"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "single-segment-array",
+  "terms": {
+   "contractType": "LAX",
+   "contractID": "lax01",
+   "contractRole": "RPA",
+   "statusDate": "2012-12-30T00:00:00",
+   "initialExchangeDate": "2013-01-01T00:00:00",
+   "maturityDate": "2013-11-01T00:00:00",
+   "notionalPrincipal": "5000",
+   "nominalInterestRate": "0.08",
+   "cycleAnchorDateOfPrincipalRedemption": "2013-02-01T00:00:00",
+   "cycleOfPrincipalRedemption": "P1ML0",
+   "nextPrincipalRedemptionPayment": "500",
+   "cycleAnchorDateOfInterestPayment": "2013-02-01T00:00:00",
+   "cycleOfInterestPayment": "P1ML0",
+   "dayCountConvention": "A365",
+   "interestCalculationBase": "NT",
+   "currency": "USD",
+   "arrayCycleAnchorDateOfPrincipalRedemption": [
+    "2013-02-01T00:00:00"
+   ],
+   "arrayCycleOfPrincipalRedemption": [
+    "P1ML0"
+   ],
+   "arrayNextPrincipalRedemptionPayment": [
+    "500"
+   ],
+   "arrayIncreaseDecrease": [
+    "DEC"
+   ]
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "two-segment-dec",
+  "terms": {
+   "contractType": "LAX",
+   "contractID": "lax02",
+   "contractRole": "RPA",
+   "statusDate": "2025-12-30T00:00:00",
+   "initialExchangeDate": "2026-01-01T00:00:00",
+   "maturityDate": "2028-01-01T00:00:00",
+   "notionalPrincipal": "1440",
+   "nominalInterestRate": "0",
+   "arrayCycleAnchorDateOfPrincipalRedemption": [
+    "2026-01-01T00:00:00",
+    "2027-01-01T00:00:00"
+   ],
+   "arrayCycleOfPrincipalRedemption": [
+    "P1ML0",
+    "P3ML1"
+   ],
+   "arrayNextPrincipalRedemptionPayment": [
+    "100",
+    "60"
+   ],
+   "arrayIncreaseDecrease": [
+    "DEC",
+    "DEC"
+   ],
+   "dayCountConvention": "A365",
+   "endOfMonthConvention": "SD",
+   "businessDayConvention": "NOS",
+   "calendar": "NC",
+   "currency": "USD"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "increase-then-decrease-borrower",
+  "terms": {
+   "contractType": "LAX",
+   "contractID": "lax02",
+   "contractRole": "RPL",
+   "statusDate": "2025-12-30T00:00:00",
+   "initialExchangeDate": "2026-01-01T00:00:00",
+   "maturityDate": "2028-01-01T00:00:00",
+   "notionalPrincipal": "1440",
+   "nominalInterestRate": "0.05",
+   "arrayCycleAnchorDateOfPrincipalRedemption": [
+    "2026-01-01T00:00:00",
+    "2027-01-01T00:00:00"
+   ],
+   "arrayCycleOfPrincipalRedemption": [
+    "P1ML0",
+    "P3ML1"
+   ],
+   "arrayNextPrincipalRedemptionPayment": [
+    "50",
+    "200"
+   ],
+   "arrayIncreaseDecrease": [
+    "INC",
+    "DEC"
+   ],
+   "dayCountConvention": "A365",
+   "endOfMonthConvention": "SD",
+   "businessDayConvention": "NOS",
+   "calendar": "NC",
+   "currency": "USD"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "array-rate-reset",
+  "terms": {
+   "contractType": "LAX",
+   "contractID": "lax02",
+   "contractRole": "RPA",
+   "statusDate": "2025-12-30T00:00:00",
+   "initialExchangeDate": "2026-01-01T00:00:00",
+   "maturityDate": "2028-01-01T00:00:00",
+   "notionalPrincipal": "1440",
+   "nominalInterestRate": "0.04",
+   "arrayCycleAnchorDateOfPrincipalRedemption": [
+    "2026-01-01T00:00:00",
+    "2027-01-01T00:00:00"
+   ],
+   "arrayCycleOfPrincipalRedemption": [
+    "P1ML0",
+    "P3ML1"
+   ],
+   "arrayNextPrincipalRedemptionPayment": [
+    "100",
+    "60"
+   ],
+   "arrayIncreaseDecrease": [
+    "DEC",
+    "DEC"
+   ],
+   "dayCountConvention": "A365",
+   "endOfMonthConvention": "SD",
+   "businessDayConvention": "NOS",
+   "calendar": "NC",
+   "currency": "USD",
+   "arrayCycleAnchorDateOfRateReset": [
+    "2026-07-01T00:00:00"
+   ],
+   "arrayCycleOfRateReset": [
+    "P6ML1"
+   ],
+   "arrayRate": [
+    "0.01"
+   ],
+   "arrayFixedVariable": "V",
+   "marketObjectCodeOfRateReset": "EURIBOR"
+  },
+  "scenario": {
+   "rates": {
+    "EURIBOR": {
+     "2026-06-01T00:00:00": "0.03",
+     "2027-06-01T00:00:00": "0.045"
+    }
+   },
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ }
+]

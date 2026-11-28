@@ -1,0 +1,150 @@
+[
+ {
+  "name": "receive-fixed",
+  "terms": {
+   "contractType": "SWPPV",
+   "contractID": "swppv01",
+   "contractRole": "RFL",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "contractDealDate": "2025-01-01T00:00:00",
+   "initialExchangeDate": "2025-01-01T00:00:00",
+   "maturityDate": "2026-01-01T00:00:00",
+   "notionalPrincipal": "10000000",
+   "nominalInterestRate": "0.03",
+   "cycleAnchorDateOfInterestPayment": "2025-01-01T00:00:00",
+   "cycleOfInterestPayment": "P3ML0",
+   "dayCountConvention": "30E360",
+   "marketObjectCodeOfRateReset": "USD-SOFR"
+  },
+  "scenario": {
+   "rates": {
+    "USD-SOFR": {
+     "2025-01-01T00:00:00": "0.025"
+    }
+   },
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "pay-fixed",
+  "terms": {
+   "contractType": "SWPPV",
+   "contractID": "swppv01",
+   "contractRole": "PFL",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "contractDealDate": "2025-01-01T00:00:00",
+   "initialExchangeDate": "2025-01-01T00:00:00",
+   "maturityDate": "2026-01-01T00:00:00",
+   "notionalPrincipal": "10000000",
+   "nominalInterestRate": "0.03",
+   "cycleAnchorDateOfInterestPayment": "2025-01-01T00:00:00",
+   "cycleOfInterestPayment": "P3ML0",
+   "dayCountConvention": "30E360",
+   "marketObjectCodeOfRateReset": "USD-SOFR"
+  },
+  "scenario": {
+   "rates": {
+    "USD-SOFR": {
+     "2025-01-01T00:00:00": "0.025"
+    }
+   },
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "receive-fixed-quarterly-resets",
+  "terms": {
+   "contractType": "SWPPV",
+   "contractID": "swppv01",
+   "contractRole": "RFL",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "contractDealDate": "2025-01-01T00:00:00",
+   "initialExchangeDate": "2025-01-01T00:00:00",
+   "maturityDate": "2026-01-01T00:00:00",
+   "notionalPrincipal": "10000000",
+   "nominalInterestRate": "0.03",
+   "cycleAnchorDateOfInterestPayment": "2025-01-01T00:00:00",
+   "cycleOfInterestPayment": "P3ML0",
+   "dayCountConvention": "30E360",
+   "marketObjectCodeOfRateReset": "USD-SOFR",
+   "cycleAnchorDateOfRateReset": "2025-01-01T00:00:00",
+   "cycleOfRateReset": "P3ML0",
+   "rateSpread": "0.001"
+  },
+  "scenario": {
+   "rates": {
+    "USD-SOFR": {
+     "2025-01-01T00:00:00": "0.025",
+     "2025-04-01T00:00:00": "0.035",
+     "2025-07-01T00:00:00": "0.02",
+     "2025-10-01T00:00:00": "0.04"
+    }
+   },
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "composed-two-legs",
+  "terms": {
+   "contractType": "SWPPV",
+   "contractRole": "RFL",
+   "currency": "USD",
+   "statusDate": "2012-12-30T00:00:00",
+   "contractStructure": [
+    {
+     "object": {
+      "contractType": "PAM",
+      "contractID": "leg1",
+      "contractRole": "RPA",
+      "initialExchangeDate": "2013-01-01T00:00:00",
+      "statusDate": "2012-12-30T00:00:00",
+      "notionalPrincipal": "1000",
+      "nominalInterestRate": "0.1",
+      "dayCountConvention": "30E360",
+      "maturityDate": "2014-01-01T00:00:00",
+      "cycleAnchorDateOfInterestPayment": "2013-01-01T00:00:00",
+      "cycleOfInterestPayment": "P3ML0"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "FIL"
+    },
+    {
+     "object": {
+      "contractType": "PAM",
+      "contractID": "leg2",
+      "contractRole": "RPA",
+      "initialExchangeDate": "2013-01-01T00:00:00",
+      "statusDate": "2012-12-30T00:00:00",
+      "notionalPrincipal": "1000",
+      "nominalInterestRate": "0.04",
+      "dayCountConvention": "30E360",
+      "maturityDate": "2014-01-01T00:00:00",
+      "cycleAnchorDateOfInterestPayment": "2013-01-01T00:00:00",
+      "cycleOfInterestPayment": "P3ML0"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "SEL"
+    }
+   ]
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ }
+]

@@ -1,0 +1,113 @@
+[
+ {
+  "name": "buy-dividends-sell",
+  "terms": {
+   "contractType": "STK",
+   "contractID": "stk01",
+   "contractRole": "RPA",
+   "statusDate": "2016-01-01T00:00:00",
+   "initialExchangeDate": "2016-01-15T00:00:00",
+   "purchaseDate": "2016-01-15T00:00:00",
+   "quantity": "100",
+   "priceAtPurchaseDate": "50",
+   "priceAtTerminationDate": "55",
+   "notionalPrincipal": "5000",
+   "cycleAnchorDateOfDividend": "2016-02-15T00:00:00",
+   "cycleOfDividend": "P1ML1",
+   "nextDividendPaymentAmount": "2.5",
+   "terminationDate": "2016-04-15T00:00:00",
+   "currency": "USD"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "short-position",
+  "terms": {
+   "contractType": "STK",
+   "contractID": "stk01",
+   "contractRole": "RPL",
+   "statusDate": "2016-01-01T00:00:00",
+   "initialExchangeDate": "2016-01-15T00:00:00",
+   "purchaseDate": "2016-01-15T00:00:00",
+   "quantity": "100",
+   "priceAtPurchaseDate": "50",
+   "priceAtTerminationDate": "55",
+   "notionalPrincipal": "5000",
+   "cycleAnchorDateOfDividend": "2016-02-15T00:00:00",
+   "cycleOfDividend": "P1ML1",
+   "nextDividendPaymentAmount": "2.5",
+   "terminationDate": "2016-04-15T00:00:00",
+   "currency": "USD"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "market-priced-sale",
+  "terms": {
+   "contractType": "STK",
+   "contractID": "stk01",
+   "contractRole": "RPA",
+   "statusDate": "2016-01-01T00:00:00",
+   "initialExchangeDate": "2016-01-15T00:00:00",
+   "purchaseDate": "2016-01-15T00:00:00",
+   "quantity": "100",
+   "priceAtPurchaseDate": "50",
+   "priceAtTerminationDate": "55",
+   "notionalPrincipal": "5000",
+   "cycleAnchorDateOfDividend": "2016-02-15T00:00:00",
+   "cycleOfDividend": "P1ML1",
+   "nextDividendPaymentAmount": "2.5",
+   "terminationDate": "2016-04-15T00:00:00",
+   "currency": "USD",
+   "marketObjectCode": "ACME"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {
+    "ACME": {
+     "2016-04-01T00:00:00": "58.25"
+    }
+   },
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "quarterly-dividends-no-termination",
+  "terms": {
+   "contractType": "STK",
+   "contractID": "stk01",
+   "contractRole": "RPA",
+   "statusDate": "2016-01-01T00:00:00",
+   "initialExchangeDate": "2016-01-15T00:00:00",
+   "purchaseDate": "2016-01-15T00:00:00",
+   "quantity": "100",
+   "priceAtPurchaseDate": "50",
+   "notionalPrincipal": "5000",
+   "cycleAnchorDateOfDividend": "2016-02-15T00:00:00",
+   "cycleOfDividend": "P3ML0",
+   "nextDividendPaymentAmount": "2.5",
+   "currency": "USD"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ }
+]

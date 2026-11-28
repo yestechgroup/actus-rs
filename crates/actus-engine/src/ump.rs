@@ -42,37 +42,18 @@ use chrono::NaiveDateTime;
 use rust_decimal::Decimal;
 
 use actus_model::{
-    ContractRole, ContractTerms, ContractType, Cycle, DayCountConvention, EndOfMonthConvention,
-    EventType,
+    ContractTerms, ContractType, Cycle, DayCountConvention, EndOfMonthConvention, EventType,
 };
 
+use crate::common::role_sign;
+use crate::common::rolls_before;
 use crate::daycount::{day_count_fraction, normalize_timestamp};
 use crate::engine::ContractEngine;
 use crate::event::{sequence_rank, ContractEvent};
+use crate::num::ck;
 use crate::risk::RiskFactorProvider;
-use crate::schedule::cycle_step;
 use crate::state::{ContractState, ContractStatus};
 use crate::EngineError;
-
-/// The contract role sign of the market instrument engines (paper section
-/// 3.7 "Contract Role Sign Convention", Table 1).
-///
-/// The shared `role_sign` helper covers the fixed-income `RPA`/`RPL` pair;
-/// the contingent and market instrument engines (UMP, STK, COM, FXOUT) also
-/// face the short and seller orientations, which map to `-1` per Table 1
-/// (`RPL`, `RF`/`ST`, `PF`, `SEL`, `UDLM`). All other roles act as `+1`.
-pub(crate) fn position_sign(terms: &ContractTerms) -> Decimal {
-    match terms.contract_role {
-        Some(
-            ContractRole::Rpl
-            | ContractRole::Rf
-            | ContractRole::Pf
-            | ContractRole::Sel
-            | ContractRole::Udlm,
-        ) => -Decimal::ONE,
-        _ => Decimal::ONE,
-    }
-}
 
 /// Implementation of the UMP contract type.
 #[derive(Debug, Clone, Copy, Default)]
@@ -137,7 +118,7 @@ impl ContractEngine for UmpEngine {
             .ok_or(EngineError::MissingAttribute("dayCountConvention"))?;
         let t0 = ContractState::initial(terms).status_date;
         let termination = terms.termination_date.map(normalize_timestamp);
-        let sgn = position_sign(terms);
+        let sgn = role_sign(terms);
         let ctx = Context {
             dcc,
             sgn,
@@ -182,9 +163,11 @@ impl ContractEngine for UmpEngine {
         slots.sort_by_key(|slot| (slot.time, slot.kind.priority()));
 
         let mut state = ContractState::initial(terms);
-        state.notional_principal = sgn * notional;
+        state.notional_principal = (ck(sgn) * notional).get()?;
         state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
-        state.accrued_interest = terms.accrued_interest.unwrap_or(Decimal::ZERO);
+        // IPAC is unsigned; the state is role-signed like the notional.
+        state.accrued_interest =
+            (ck(sgn) * terms.accrued_interest.unwrap_or(Decimal::ZERO)).get()?;
         let mut events = Vec::new();
         for slot in slots {
             let payoff = ctx.apply(&mut state, slot, terms, risk)?;
@@ -273,35 +256,39 @@ impl Context {
         risk: &dyn RiskFactorProvider,
     ) -> Result<Decimal, EngineError> {
         let y = day_count_fraction(state.status_date, slot.time, self.dcc)?;
-        let accrual = y * state.nominal_interest_rate * state.notional_principal;
+        let accrual = (ck(y) * state.nominal_interest_rate * state.notional_principal).get()?;
         let payoff = match slot.kind {
             Kind::InitialExchange => {
                 let notional = terms
                     .notional_principal
                     .ok_or(EngineError::MissingAttribute("notionalPrincipal"))?;
-                state.notional_principal = self.sgn * notional;
+                state.notional_principal = (ck(self.sgn) * notional).get()?;
                 state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
-                state.accrued_interest = terms.accrued_interest.unwrap_or(Decimal::ZERO);
-                -self.sgn * notional
+                state.accrued_interest =
+                    (ck(self.sgn) * terms.accrued_interest.unwrap_or(Decimal::ZERO)).get()?;
+                (-ck(self.sgn) * notional).get()?
             }
             Kind::PrincipalRedemption => {
-                state.accrued_interest += accrual;
-                let mut payoff = state.notional_scaling_multiplier
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
+                let mut payoff = (ck(state.notional_scaling_multiplier)
                     * self.sgn
-                    * state.next_principal_redemption_payment;
+                    * state.next_principal_redemption_payment)
+                    .get()?;
                 if payoff.abs() > state.notional_principal.abs() {
                     payoff = state.notional_principal;
                 }
-                state.notional_principal -= payoff;
+                state.notional_principal = (ck(state.notional_principal) - payoff).get()?;
                 payoff
             }
             Kind::InterestPayment => {
-                let payoff = state.interest_scaling_multiplier * (state.accrued_interest + accrual);
+                let payoff = (state.interest_scaling_multiplier
+                    * (ck(state.accrued_interest) + accrual))
+                    .get()?;
                 state.accrued_interest = Decimal::ZERO;
                 payoff
             }
             Kind::RateReset => {
-                state.accrued_interest += accrual;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 let code = terms
                     .market_object_code_of_rate_reset
                     .as_deref()
@@ -314,14 +301,15 @@ impl Context {
                         })?;
                 let multiplier = terms.rate_multiplier.unwrap_or(Decimal::ONE);
                 let spread = terms.rate_spread.unwrap_or(Decimal::ZERO);
-                state.nominal_interest_rate = observed * multiplier + spread;
+                state.nominal_interest_rate = (ck(observed) * multiplier + spread).get()?;
                 Decimal::ZERO
             }
             Kind::Termination => {
                 let price = terms
                     .price_at_termination_date
                     .ok_or(EngineError::MissingAttribute("priceAtTerminationDate"))?;
-                let payoff = self.sgn * (price + state.accrued_interest + accrual);
+                let payoff =
+                    (ck(self.sgn) * (ck(price) + state.accrued_interest + accrual)).get()?;
                 state.notional_principal = Decimal::ZERO;
                 state.accrued_interest = Decimal::ZERO;
                 state.fee_accrued = Decimal::ZERO;
@@ -344,21 +332,7 @@ fn roll_series(
     let Some(termination) = termination else {
         return Ok(vec![anchor]);
     };
-    let eomc = EndOfMonthConvention::Sd;
-    let mut rolls = vec![anchor];
-    let mut index: u64 = 0;
-    loop {
-        index += 1;
-        let next = cycle_step(anchor, index, cycle, eomc)?;
-        if next >= termination {
-            break;
-        }
-        rolls.push(next);
-        if index > 20_000 {
-            break;
-        }
-    }
-    Ok(rolls)
+    rolls_before(anchor, cycle, EndOfMonthConvention::Sd, termination)
 }
 
 #[cfg(test)]
@@ -397,6 +371,59 @@ mod tests {
             "dayCountConvention": "A365",
             "currency": "CHF"
         })
+    }
+
+    /// A daily interest schedule over 60 years (more than 20,000 rolls) runs
+    /// to the termination instead of stopping silently after 20,000 rolls.
+    #[test]
+    fn long_interest_schedules_are_not_truncated() {
+        let mut raw = base_terms();
+        raw["cycleAnchorDateOfInterestPayment"] = json!("2016-01-15T00:00:00");
+        raw["cycleOfInterestPayment"] = json!("P1DL1");
+        raw["terminationDate"] = json!("2076-01-15T00:00:00");
+        raw["priceAtTerminationDate"] = json!("1000");
+        let events = UmpEngine
+            .evaluate(&terms(raw), &StateProvider::new())
+            .expect("events");
+        let last_ip = events
+            .iter()
+            .rfind(|e| e.event_type == EventType::InterestPayment)
+            .expect("interest payments");
+        assert_eq!(last_ip.time, t("2076-01-14T00:00:00"));
+    }
+
+    /// A carried `accruedInterest` (`IPAC`) is an unsigned attribute; the
+    /// state is role-signed like the notional (actus-core
+    /// `UndefinedMaturityProfile` initial states: `roleSign x IPAC`, kept by
+    /// `STF_IED_PAM`; the same rule as PAM/LAM/NAM, #27). The `RPL` mirror
+    /// then negates every payoff and signed state of the `RPA` contract.
+
+    #[test]
+    fn carried_accrued_interest_is_role_signed() {
+        let mut raw = base_terms();
+        raw["accruedInterest"] = json!("10");
+        raw["terminationDate"] = json!("2016-09-15T00:00:00");
+        raw["priceAtTerminationDate"] = json!("1000");
+        let risk = StateProvider::new()
+            .with_observed_event(observed("2016-06-15T00:00:00", EventType::InterestPayment));
+        let lender = UmpEngine.evaluate(&terms(raw.clone()), &risk).expect("RPA");
+        raw["contractRole"] = json!("RPL");
+        let borrower = UmpEngine.evaluate(&terms(raw), &risk).expect("RPL");
+
+        assert_eq!(lender[0].event_type, EventType::InitialExchange);
+        assert_eq!(lender[0].state.accrued_interest, dec!(10));
+        assert_eq!(borrower[0].state.accrued_interest, dec!(-10));
+        assert_eq!(lender.len(), borrower.len());
+        for (a, b) in lender.iter().zip(&borrower) {
+            assert_eq!(a.event_type, b.event_type);
+            assert_eq!(b.state.notional_principal, -a.state.notional_principal);
+            assert_eq!(b.state.accrued_interest, -a.state.accrued_interest);
+            if a.event_type != EventType::Termination {
+                // TD pays `sgn x (PTD + Ipac)` with a signed Ipac (techspec
+                // PAM TD row), which is not a pure mirror.
+                assert_eq!(b.payoff, -a.payoff, "{:?}", a.event_type);
+            }
+        }
     }
 
     fn observed(time: &str, event_type: EventType) -> ObservedEvent {

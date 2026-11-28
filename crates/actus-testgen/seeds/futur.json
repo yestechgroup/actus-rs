@@ -1,0 +1,102 @@
+[
+ {
+  "name": "long-gain",
+  "terms": {
+   "contractType": "FUTUR",
+   "contractID": "futur01",
+   "contractRole": "RPA",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "maturityDate": "2025-06-30T00:00:00",
+   "notionalPrincipal": "10",
+   "futuresPrice": "100",
+   "marketObjectCode": "CM-WHEAT"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {
+    "CM-WHEAT": {
+     "2025-06-30T00:00:00": "110"
+    }
+   },
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "short-gain",
+  "terms": {
+   "contractType": "FUTUR",
+   "contractID": "futur01",
+   "contractRole": "SEL",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "maturityDate": "2025-06-30T00:00:00",
+   "notionalPrincipal": "10",
+   "futuresPrice": "100",
+   "marketObjectCode": "CM-WHEAT"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {
+    "CM-WHEAT": {
+     "2025-06-30T00:00:00": "110"
+    }
+   },
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "long-loss",
+  "terms": {
+   "contractType": "FUTUR",
+   "contractID": "futur01",
+   "contractRole": "RPA",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "maturityDate": "2025-06-30T00:00:00",
+   "notionalPrincipal": "10",
+   "futuresPrice": "100",
+   "marketObjectCode": "CM-WHEAT"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {
+    "CM-WHEAT": {
+     "2025-06-30T00:00:00": "95"
+    }
+   },
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "long-price-observed-before-md",
+  "terms": {
+   "contractType": "FUTUR",
+   "contractID": "futur01",
+   "contractRole": "RPA",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "maturityDate": "2025-06-30T00:00:00",
+   "notionalPrincipal": "5000",
+   "futuresPrice": "100",
+   "marketObjectCode": "CM-WHEAT"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {
+    "CM-WHEAT": {
+     "2025-03-01T00:00:00": "98.5"
+    }
+   },
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ }
+]

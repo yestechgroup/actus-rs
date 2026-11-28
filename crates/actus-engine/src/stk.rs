@@ -45,13 +45,14 @@ use rust_decimal::Decimal;
 
 use actus_model::{ContractTerms, ContractType, EndOfMonthConvention, EventType};
 
+use crate::common::role_sign;
+use crate::common::rolls_before;
 use crate::daycount::normalize_timestamp;
 use crate::engine::ContractEngine;
 use crate::event::{sequence_rank, ContractEvent};
+use crate::num::ck;
 use crate::risk::RiskFactorProvider;
-use crate::schedule::cycle_step;
 use crate::state::{ContractState, ContractStatus};
-use crate::ump::position_sign;
 use crate::EngineError;
 
 /// Implementation of the STK contract type.
@@ -98,7 +99,7 @@ pub(crate) fn evaluate_position(
     let entry_price = terms
         .price_at_purchase_date
         .ok_or(EngineError::MissingAttribute("priceAtPurchaseDate"))?;
-    let sgn = position_sign(terms);
+    let sgn = role_sign(terms);
     let t0 = ContractState::initial(terms).status_date;
     let ied = terms.initial_exchange_date.map(normalize_timestamp);
     let purchase = terms.purchase_date.map(normalize_timestamp);
@@ -117,7 +118,7 @@ pub(crate) fn evaluate_position(
                 payoff: if price_moves_with_purchase {
                     Decimal::ZERO
                 } else {
-                    -sgn * quantity * entry_price
+                    (-ck(sgn) * quantity * entry_price).get()?
                 },
             });
         }
@@ -127,7 +128,7 @@ pub(crate) fn evaluate_position(
             slots.push(Slot {
                 kind: Kind::Purchase,
                 time: prd,
-                payoff: -sgn * quantity * entry_price,
+                payoff: (-ck(sgn) * quantity * entry_price).get()?,
             });
         }
     }
@@ -148,7 +149,7 @@ pub(crate) fn evaluate_position(
             slots.push(Slot {
                 kind: Kind::Termination,
                 time: td,
-                payoff: sgn * quantity * price,
+                payoff: (ck(sgn) * quantity * price).get()?,
             });
         }
     }
@@ -159,7 +160,7 @@ pub(crate) fn evaluate_position(
     for slot in slots {
         match slot.kind {
             Kind::InitialExchange | Kind::Purchase => {
-                state.notional_principal = sgn * quantity * entry_price;
+                state.notional_principal = (ck(sgn) * quantity * entry_price).get()?;
             }
             Kind::Termination => {
                 state.notional_principal = Decimal::ZERO;
@@ -230,28 +231,16 @@ fn dividend_slots(
         return Ok(());
     };
     let amount = terms.next_dividend_payment_amount.unwrap_or(Decimal::ZERO);
-    let payoff = sgn * quantity * amount;
+    let payoff = (ck(sgn) * quantity * amount).get()?;
     let rolls = match terms.cycle_of_dividend.as_ref() {
         Some(cycle) => {
             let eomc = terms
                 .end_of_month_convention
                 .unwrap_or(EndOfMonthConvention::Sd);
-            let mut rolls = vec![anchor];
-            if let Some(termination) = termination {
-                let mut index: u64 = 0;
-                loop {
-                    index += 1;
-                    let next = cycle_step(anchor, index, cycle, eomc)?;
-                    if next >= termination {
-                        break;
-                    }
-                    rolls.push(next);
-                    if index > 20_000 {
-                        break;
-                    }
-                }
+            match termination {
+                Some(termination) => rolls_before(anchor, cycle, eomc, termination)?,
+                None => vec![anchor],
             }
-            rolls
         }
         None => vec![anchor],
     };
@@ -330,6 +319,30 @@ mod tests {
             "terminationDate": "2016-04-15T00:00:00",
             "currency": "USD"
         })
+    }
+
+    /// A daily dividend schedule over 64 years (more than 20,000 rolls)
+    /// pays every dividend up to the termination: the roll limit is the
+    /// engine-wide `MAX_SCHEDULE_ROLLS` with an error past it, not a silent
+    /// cut at 20,000 rolls.
+    #[test]
+    fn long_dividend_schedules_are_not_truncated() {
+        let mut raw = base_terms();
+        raw["cycleAnchorDateOfDividend"] = json!("2016-02-15T00:00:00");
+        raw["cycleOfDividend"] = json!("P1DL1");
+        raw["terminationDate"] = json!("2080-01-01T00:00:00");
+        let events = StkEngine
+            .evaluate(&terms(raw), &StateProvider::new())
+            .expect("events");
+        let dividends: Vec<&ContractEvent> = events
+            .iter()
+            .filter(|e| e.event_type == EventType::DividendPayment)
+            .collect();
+        assert!(dividends.len() > 20_002, "{} dividends", dividends.len());
+        assert_eq!(
+            dividends.last().expect("dividends").time,
+            t("2079-12-31T00:00:00")
+        );
     }
 
     /// Buy 100 shares at 50 (payoff -5000, position notional +5000), two

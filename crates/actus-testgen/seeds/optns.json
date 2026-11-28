@@ -1,0 +1,163 @@
+[
+ {
+  "name": "itm-call-buyer",
+  "terms": {
+   "contractType": "OPTNS",
+   "contractID": "optns01",
+   "contractRole": "RPA",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "maturityDate": "2025-12-31T00:00:00",
+   "notionalPrincipal": "100",
+   "optionType": "C",
+   "optionStrike1": "100",
+   "exerciseDate": "2025-06-30T00:00:00",
+   "marketObjectCode": "EQ-ABC"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {
+    "EQ-ABC": {
+     "2025-06-30T00:00:00": "110"
+    }
+   },
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "itm-put-buyer",
+  "terms": {
+   "contractType": "OPTNS",
+   "contractID": "optns01",
+   "contractRole": "RPA",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "maturityDate": "2025-12-31T00:00:00",
+   "notionalPrincipal": "100",
+   "optionType": "P",
+   "optionStrike1": "100",
+   "exerciseDate": "2025-06-30T00:00:00",
+   "marketObjectCode": "EQ-ABC"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {
+    "EQ-ABC": {
+     "2025-06-30T00:00:00": "90"
+    }
+   },
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "call-seller",
+  "terms": {
+   "contractType": "OPTNS",
+   "contractID": "optns01",
+   "contractRole": "SEL",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "maturityDate": "2025-12-31T00:00:00",
+   "notionalPrincipal": "100",
+   "optionType": "C",
+   "optionStrike1": "100",
+   "exerciseDate": "2025-06-30T00:00:00",
+   "marketObjectCode": "EQ-ABC"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {
+    "EQ-ABC": {
+     "2025-06-30T00:00:00": "110"
+    }
+   },
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "otm-call-with-premium",
+  "terms": {
+   "contractType": "OPTNS",
+   "contractID": "optns01",
+   "contractRole": "RPA",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "maturityDate": "2025-12-31T00:00:00",
+   "notionalPrincipal": "100",
+   "optionType": "C",
+   "optionStrike1": "100",
+   "exerciseDate": "2025-06-30T00:00:00",
+   "marketObjectCode": "EQ-ABC",
+   "premiumDiscountAtIED": "50",
+   "initialExchangeDate": "2025-01-01T00:00:00"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {
+    "EQ-ABC": {
+     "2025-06-30T00:00:00": "90"
+    }
+   },
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "callput-straddle",
+  "terms": {
+   "contractType": "OPTNS",
+   "contractID": "optns01",
+   "contractRole": "RPA",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "maturityDate": "2025-12-31T00:00:00",
+   "notionalPrincipal": "100",
+   "optionType": "CP",
+   "optionStrike1": "100",
+   "exerciseDate": "2025-06-30T00:00:00",
+   "marketObjectCode": "EQ-ABC",
+   "optionStrike2": "95"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {
+    "EQ-ABC": {
+     "2025-06-30T00:00:00": "120"
+    }
+   },
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "exercise-amount-fallback",
+  "terms": {
+   "contractType": "OPTNS",
+   "contractID": "optns01",
+   "contractRole": "RPA",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "maturityDate": "2025-12-31T00:00:00",
+   "notionalPrincipal": "100",
+   "optionType": "C",
+   "optionStrike1": "100",
+   "exerciseDate": "2025-06-30T00:00:00",
+   "exerciseAmount": "250"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ }
+]

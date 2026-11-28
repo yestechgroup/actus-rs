@@ -93,3 +93,16 @@ fn spec_and_terms_builders_report_bad_input() {
     .starts_with("invalid values JSON"));
     assert!(actus_wasm::build_terms_json("XXX".to_string(), "{}".to_string()).is_err());
 }
+
+mod regression_cases;
+
+/// Inputs that used to panic (and abort this runtime) reach JS as errors.
+#[wasm_bindgen_test]
+fn former_panics_reach_js_as_errors() {
+    for (name, terms, scenario, expected) in regression_cases::CASES {
+        let error =
+            actus_wasm::evaluate_with_risk(terms.to_string(), scenario.to_string()).unwrap_err();
+        let error = message(error);
+        assert!(error.contains(expected), "{name}: {error}");
+    }
+}

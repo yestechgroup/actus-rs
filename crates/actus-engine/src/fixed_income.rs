@@ -20,6 +20,7 @@ use actus_model::{
 use crate::common::{anchored_series, calculation_time, stub_series, stub_series_unshifted};
 use crate::daycount::{day_count_fraction, normalize_timestamp};
 use crate::event::ContractEvent;
+use crate::num::ck;
 use crate::state::ContractState;
 use crate::EngineError;
 
@@ -287,14 +288,14 @@ pub(crate) fn evaluate_schedule<S: ScheduledEvent>(
     slots: Vec<S>,
     terms: &ContractTerms,
     progressed: impl FnOnce() -> Result<ContractState, EngineError>,
-    pre_ied: impl FnOnce() -> ContractState,
+    pre_ied: impl FnOnce() -> Result<ContractState, EngineError>,
     mut apply: impl FnMut(&mut ContractState, S) -> Result<Decimal, EngineError>,
 ) -> Result<Vec<ContractEvent>, EngineError> {
     let is_progressed = ied < t0;
     let mut state = if is_progressed {
         progressed()?
     } else {
-        pre_ied()
+        pre_ied()?
     };
     let mut events = Vec::new();
     for slot in slots {
@@ -330,12 +331,12 @@ pub(crate) fn initial_accrued(
     sgn: Decimal,
 ) -> Result<Decimal, EngineError> {
     if let Some(accrued) = terms.accrued_interest {
-        return Ok(sgn * accrued);
+        return (ck(sgn) * accrued).get();
     }
     if let Some(anchor) = terms.cycle_anchor_date_of_interest_payment {
         if anchor < ied {
             let yf = day_count_fraction(anchor, ied, dcc)?;
-            return Ok(yf * state.notional_principal * state.nominal_interest_rate);
+            return (ck(yf) * state.notional_principal * state.nominal_interest_rate).get();
         }
     }
     Ok(Decimal::ZERO)
@@ -366,7 +367,8 @@ pub(crate) fn progressed_accrued(
         Some(t_minus) => {
             let yf = day_count_fraction(t_minus, c.t0, c.dcc)?;
             Ok(Some(
-                yf * base_amount * terms.nominal_interest_rate.unwrap_or(Decimal::ZERO),
+                (ck(yf) * base_amount * terms.nominal_interest_rate.unwrap_or(Decimal::ZERO))
+                    .get()?,
             ))
         }
         None => Ok(None),

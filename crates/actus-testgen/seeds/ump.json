@@ -1,0 +1,141 @@
+[
+ {
+  "name": "observed-pr-and-ip",
+  "terms": {
+   "contractType": "UMP",
+   "contractID": "ump01",
+   "contractRole": "RPA",
+   "statusDate": "2016-01-01T00:00:00",
+   "initialExchangeDate": "2016-01-15T00:00:00",
+   "notionalPrincipal": "1000",
+   "nominalInterestRate": "0.12",
+   "nextPrincipalRedemptionPayment": "400",
+   "dayCountConvention": "A365",
+   "currency": "CHF"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [
+    {
+     "eventType": "PR",
+     "time": "2016-03-15T00:00:00"
+    },
+    {
+     "eventType": "IP",
+     "time": "2016-06-15T00:00:00"
+    }
+   ],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "termination-borrower",
+  "terms": {
+   "contractType": "UMP",
+   "contractID": "ump01",
+   "contractRole": "RPL",
+   "statusDate": "2016-01-01T00:00:00",
+   "initialExchangeDate": "2016-01-15T00:00:00",
+   "notionalPrincipal": "1000",
+   "nominalInterestRate": "0.12",
+   "nextPrincipalRedemptionPayment": "400",
+   "dayCountConvention": "A365",
+   "currency": "CHF",
+   "terminationDate": "2016-09-15T00:00:00",
+   "priceAtTerminationDate": "500"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "scheduled-ip-to-termination",
+  "terms": {
+   "contractType": "UMP",
+   "contractID": "ump01",
+   "contractRole": "RPA",
+   "statusDate": "2016-01-01T00:00:00",
+   "initialExchangeDate": "2016-01-15T00:00:00",
+   "notionalPrincipal": "1000",
+   "nominalInterestRate": "0.12",
+   "nextPrincipalRedemptionPayment": "400",
+   "dayCountConvention": "A365",
+   "currency": "CHF",
+   "cycleAnchorDateOfInterestPayment": "2016-01-15T00:00:00",
+   "cycleOfInterestPayment": "P1ML1",
+   "terminationDate": "2016-03-15T00:00:00",
+   "priceAtTerminationDate": "1000"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "scheduled-quarterly-ip-borrower",
+  "terms": {
+   "contractType": "UMP",
+   "contractID": "ump01",
+   "contractRole": "RPL",
+   "statusDate": "2016-01-01T00:00:00",
+   "initialExchangeDate": "2016-01-15T00:00:00",
+   "notionalPrincipal": "1000",
+   "nominalInterestRate": "0.12",
+   "nextPrincipalRedemptionPayment": "400",
+   "dayCountConvention": "A365",
+   "currency": "CHF",
+   "cycleAnchorDateOfInterestPayment": "2016-01-15T00:00:00",
+   "cycleOfInterestPayment": "P3ML1",
+   "terminationDate": "2016-12-15T00:00:00",
+   "priceAtTerminationDate": "1000"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "rate-reset",
+  "terms": {
+   "contractType": "UMP",
+   "contractID": "ump01",
+   "contractRole": "RPA",
+   "statusDate": "2016-01-01T00:00:00",
+   "initialExchangeDate": "2016-01-15T00:00:00",
+   "notionalPrincipal": "1000",
+   "nominalInterestRate": "0.12",
+   "nextPrincipalRedemptionPayment": "400",
+   "dayCountConvention": "A365",
+   "currency": "CHF",
+   "cycleAnchorDateOfRateReset": "2016-04-15T00:00:00",
+   "cycleOfRateReset": "P3ML1",
+   "marketObjectCodeOfRateReset": "CHF-SARON",
+   "terminationDate": "2016-12-15T00:00:00",
+   "priceAtTerminationDate": "1000"
+  },
+  "scenario": {
+   "rates": {
+    "CHF-SARON": {
+     "2016-04-01T00:00:00": "0.08",
+     "2016-07-01T00:00:00": "0.1"
+    }
+   },
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ }
+]

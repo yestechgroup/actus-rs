@@ -1,0 +1,158 @@
+[
+ {
+  "name": "collar-holder",
+  "terms": {
+   "contractType": "CAPFL",
+   "contractID": "capfl01",
+   "contractRole": "RPA",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "initialExchangeDate": "2025-01-01T00:00:00",
+   "maturityDate": "2026-01-01T00:00:00",
+   "notionalPrincipal": "1000000",
+   "nominalInterestRate": "0.02",
+   "cycleAnchorDateOfInterestPayment": "2025-01-01T00:00:00",
+   "cycleOfInterestPayment": "P3ML0",
+   "cycleAnchorDateOfRateReset": "2025-01-01T00:00:00",
+   "cycleOfRateReset": "P3ML0",
+   "marketObjectCodeOfRateReset": "LIBOR6M",
+   "dayCountConvention": "30E360",
+   "lifeCap": "0.05",
+   "lifeFloor": "0.015"
+  },
+  "scenario": {
+   "rates": {
+    "LIBOR6M": {
+     "2025-01-01T00:00:00": "0.02",
+     "2025-04-01T00:00:00": "0.06",
+     "2025-07-01T00:00:00": "0.01",
+     "2025-10-01T00:00:00": "0.02"
+    }
+   },
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "cap-only",
+  "terms": {
+   "contractType": "CAPFL",
+   "contractID": "capfl01",
+   "contractRole": "RPA",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "initialExchangeDate": "2025-01-01T00:00:00",
+   "maturityDate": "2026-01-01T00:00:00",
+   "notionalPrincipal": "1000000",
+   "nominalInterestRate": "0.02",
+   "cycleAnchorDateOfInterestPayment": "2025-01-01T00:00:00",
+   "cycleOfInterestPayment": "P3ML0",
+   "cycleAnchorDateOfRateReset": "2025-01-01T00:00:00",
+   "cycleOfRateReset": "P3ML0",
+   "marketObjectCodeOfRateReset": "LIBOR6M",
+   "dayCountConvention": "30E360",
+   "lifeCap": "0.05"
+  },
+  "scenario": {
+   "rates": {
+    "LIBOR6M": {
+     "2025-01-01T00:00:00": "0.02",
+     "2025-04-01T00:00:00": "0.06",
+     "2025-07-01T00:00:00": "0.01",
+     "2025-10-01T00:00:00": "0.02"
+    }
+   },
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "floor-only-writer",
+  "terms": {
+   "contractType": "CAPFL",
+   "contractID": "capfl01",
+   "contractRole": "RPL",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "initialExchangeDate": "2025-01-01T00:00:00",
+   "maturityDate": "2026-01-01T00:00:00",
+   "notionalPrincipal": "1000000",
+   "nominalInterestRate": "0.02",
+   "cycleAnchorDateOfInterestPayment": "2025-01-01T00:00:00",
+   "cycleOfInterestPayment": "P3ML0",
+   "cycleAnchorDateOfRateReset": "2025-01-01T00:00:00",
+   "cycleOfRateReset": "P3ML0",
+   "marketObjectCodeOfRateReset": "LIBOR6M",
+   "dayCountConvention": "30E360",
+   "lifeFloor": "0.015"
+  },
+  "scenario": {
+   "rates": {
+    "LIBOR6M": {
+     "2025-01-01T00:00:00": "0.02",
+     "2025-04-01T00:00:00": "0.06",
+     "2025-07-01T00:00:00": "0.01",
+     "2025-10-01T00:00:00": "0.02"
+    }
+   },
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "composed-underlying",
+  "terms": {
+   "contractType": "CAPFL",
+   "contractID": "capfl01",
+   "contractRole": "RPA",
+   "currency": "USD",
+   "statusDate": "2025-01-01T00:00:00",
+   "dayCountConvention": "30E360",
+   "lifeCap": "0.05",
+   "lifeFloor": "0.015",
+   "contractStructure": [
+    {
+     "object": {
+      "contractType": "PAM",
+      "contractID": "und01",
+      "contractRole": "RPA",
+      "currency": "USD",
+      "statusDate": "2025-01-01T00:00:00",
+      "initialExchangeDate": "2025-01-01T00:00:00",
+      "maturityDate": "2026-01-01T00:00:00",
+      "notionalPrincipal": "1000000",
+      "nominalInterestRate": "0.02",
+      "cycleAnchorDateOfInterestPayment": "2025-01-01T00:00:00",
+      "cycleOfInterestPayment": "P3ML0",
+      "cycleAnchorDateOfRateReset": "2025-01-01T00:00:00",
+      "cycleOfRateReset": "P3ML0",
+      "marketObjectCodeOfRateReset": "LIBOR6M",
+      "dayCountConvention": "30E360"
+     },
+     "referenceType": "CNT",
+     "referenceRole": "UDL"
+    }
+   ]
+  },
+  "scenario": {
+   "rates": {
+    "LIBOR6M": {
+     "2025-01-01T00:00:00": "0.02",
+     "2025-04-01T00:00:00": "0.06",
+     "2025-07-01T00:00:00": "0.01",
+     "2025-10-01T00:00:00": "0.02"
+    }
+   },
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ }
+]

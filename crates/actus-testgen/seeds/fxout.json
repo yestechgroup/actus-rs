@@ -1,0 +1,131 @@
+[
+ {
+  "name": "market-settlement-buyer",
+  "terms": {
+   "contractType": "FXOUT",
+   "contractID": "fxout01",
+   "contractRole": "RPA",
+   "statusDate": "2016-01-01T00:00:00",
+   "initialExchangeDate": "2016-01-15T00:00:00",
+   "maturityDate": "2016-07-15T00:00:00",
+   "notionalPrincipal": "1000000",
+   "notionalPrincipal2": "920000",
+   "currency": "EUR",
+   "currency2": "USD"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {
+    "USD/EUR": {
+     "2016-07-15T00:00:00": "1.08"
+    }
+   },
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "market-settlement-seller",
+  "terms": {
+   "contractType": "FXOUT",
+   "contractID": "fxout01",
+   "contractRole": "RPL",
+   "statusDate": "2016-01-01T00:00:00",
+   "initialExchangeDate": "2016-01-15T00:00:00",
+   "maturityDate": "2016-07-15T00:00:00",
+   "notionalPrincipal": "1000000",
+   "notionalPrincipal2": "920000",
+   "currency": "EUR",
+   "currency2": "USD"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {
+    "USD/EUR": {
+     "2016-01-10T00:00:00": "1.08"
+    }
+   },
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "exercise-amount-with-premium",
+  "terms": {
+   "contractType": "FXOUT",
+   "contractID": "fxout01",
+   "contractRole": "RPA",
+   "statusDate": "2016-01-01T00:00:00",
+   "initialExchangeDate": "2016-01-15T00:00:00",
+   "maturityDate": "2016-07-15T00:00:00",
+   "notionalPrincipal": "1000000",
+   "notionalPrincipal2": "920000",
+   "currency": "EUR",
+   "currency2": "USD",
+   "exerciseAmount": "950000",
+   "premiumDiscountAtIED": "100"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "purchase-and-termination",
+  "terms": {
+   "contractType": "FXOUT",
+   "contractID": "fxout01",
+   "contractRole": "RPA",
+   "statusDate": "2016-01-01T00:00:00",
+   "initialExchangeDate": "2016-01-15T00:00:00",
+   "maturityDate": "2016-07-15T00:00:00",
+   "notionalPrincipal": "1000000",
+   "notionalPrincipal2": "920000",
+   "currency": "EUR",
+   "currency2": "USD",
+   "purchaseDate": "2016-02-01T00:00:00",
+   "priceAtPurchaseDate": "5000",
+   "terminationDate": "2016-06-15T00:00:00",
+   "priceAtTerminationDate": "20000"
+  },
+  "scenario": {
+   "rates": {},
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ },
+ {
+  "name": "net-settlement-rate-series",
+  "terms": {
+   "contractType": "FXOUT",
+   "contractID": "fxout01",
+   "contractRole": "RPA",
+   "statusDate": "2016-01-01T00:00:00",
+   "initialExchangeDate": "2016-01-15T00:00:00",
+   "maturityDate": "2016-07-15T00:00:00",
+   "notionalPrincipal": "1000000",
+   "notionalPrincipal2": "920000",
+   "currency": "EUR",
+   "currency2": "USD",
+   "deliverySettlement": "S"
+  },
+  "scenario": {
+   "rates": {
+    "USD/EUR": {
+     "2016-07-01T00:00:00": "1.12"
+    }
+   },
+   "fxRates": {},
+   "unitPrices": {},
+   "observedEvents": [],
+   "creditEvents": []
+  }
+ }
+]

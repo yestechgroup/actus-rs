@@ -17,11 +17,12 @@
 //! - `DEC` segments redeem linearly like LAM: the redemption reduces the
 //!   notional, is capped at the remaining notional (the lam25 convention),
 //!   and the role-signed payoff is `sgn x Nsc x redemption`.
-//! - `INC` segments amortize negatively like NAM: the principal portion of
-//!   the period payment is `Prnxt - Ipac`, so when the period accrual
-//!   exceeds the scheduled payment the shortfall capitalizes into the
-//!   notional (the nam17 mechanics carried over the role-sign conventions
-//!   of the LAM state machine).
+//! - `INC` segments increase the principal (techspec LAX functions table,
+//!   `PI` row; actus-core schedules `PI` for `INC` segments): each schedule
+//!   element draws `ARPRNXT[i]`, paying `-sgn x Nsc x Prnxt` and growing the
+//!   notional by `sgn x Prnxt`. The v1.4 dictionary has no `PI` event type,
+//!   so these events are reported as `PD` (principal drawing), see SI-002 in
+//!   `docs/spec-interpretations.md`.
 //!
 //! The `IP` interest series runs on the array interest schedule
 //! (`ARIPANX`/`ARIPCL`) when present, otherwise on the scalar `IPANX`/`IPCL`
@@ -37,7 +38,6 @@
 //! sequencing, progressed contracts) mirrors the LAM implementation.
 
 use chrono::NaiveDateTime;
-use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 
 use actus_model::enums::{ArrayFixVar, ArrayIncDec};
@@ -47,8 +47,8 @@ use actus_model::{
 };
 
 use crate::common::{
-    base_is_nt, base_tracks_notional, calculation_time, initial_base_amount, role_sign,
-    stub_series, term_scaling_multipliers,
+    base_is_nt, base_tracks_notional, calculation_time, initial_base_amount, redemption_count,
+    role_sign, stub_series, term_scaling_multipliers,
 };
 use crate::daycount::{day_count_fraction, normalize_timestamp};
 use crate::engine::ContractEngine;
@@ -58,6 +58,7 @@ use crate::fixed_income::{
     scales_interest, scales_notional, scaling_index_schedule, Conventions, RateReset,
     ScheduledEvent, Timing,
 };
+use crate::num::ck;
 use crate::risk::RiskFactorProvider;
 use crate::schedule::{array_series, cycle_step};
 use crate::state::{ContractState, ContractStatus};
@@ -122,6 +123,7 @@ impl Slot {
 enum Kind {
     InitialExchange,
     PrincipalRedemption,
+    PrincipalDrawing,
     InterestPayment,
     InterestCapitalization,
     InterestCalculationBaseFixing,
@@ -140,6 +142,7 @@ impl Kind {
         match self {
             Kind::InitialExchange => EventType::InitialExchange,
             Kind::PrincipalRedemption => EventType::PrincipalRedemption,
+            Kind::PrincipalDrawing => EventType::PrincipalDrawing,
             Kind::InterestPayment => EventType::InterestPayment,
             Kind::InterestCapitalization => EventType::InterestCapitalization,
             Kind::InterestCalculationBaseFixing => EventType::InterestCalculationBaseFixing,
@@ -284,9 +287,7 @@ impl Context {
                 let cycle = scalar_cycle
                     .as_ref()
                     .ok_or(EngineError::MissingAttribute("cycleOfPrincipalRedemption"))?;
-                let redemptions = (notional / prnxt)
-                    .ceil()
-                    .to_u64()
+                let redemptions = redemption_count(notional, prnxt)
                     .ok_or(EngineError::InvalidTransition(
                     "notional principal is not redeemable by the next principal redemption payment"
                         .to_string(),
@@ -326,7 +327,7 @@ impl Context {
                         "principal redemption schedule is empty".to_string(),
                     ));
                 }
-                notional / Decimal::from(elements as u64)
+                (ck(notional) / Decimal::from(elements as u64)).get()?
             }
         };
         let interest_array = match (
@@ -472,12 +473,13 @@ impl Context {
                 if calc >= self.maturity {
                     continue;
                 }
-                slots.push(Slot::in_segment(
-                    Kind::PrincipalRedemption,
-                    calc,
-                    *emit,
-                    Self::segment_of(anchors, *unshifted),
-                ));
+                let segment = Self::segment_of(anchors, *unshifted);
+                let kind = if self.segment_increases(segment) {
+                    Kind::PrincipalDrawing
+                } else {
+                    Kind::PrincipalRedemption
+                };
+                slots.push(Slot::in_segment(kind, calc, *emit, segment));
             }
             return Ok(pairs);
         }
@@ -635,7 +637,8 @@ impl Context {
     fn scheduled_redemption(&self, segment: usize, state: &ContractState) -> Decimal {
         match &self.payments {
             Some(payments) if !payments.is_empty() => {
-                let index = segment.min(payments.len() - 1);
+                // Non-empty by the match guard.
+                let index = segment.min(payments.len().saturating_sub(1));
                 payments[index]
             }
             _ => state.next_principal_redemption_payment,
@@ -647,7 +650,8 @@ impl Context {
     fn segment_increases(&self, segment: usize) -> bool {
         match &self.increase_decrease {
             Some(segments) if !segments.is_empty() => {
-                let index = segment.min(segments.len() - 1);
+                // Non-empty by the match guard.
+                let index = segment.min(segments.len().saturating_sub(1));
                 segments[index] == ArrayIncDec::Inc
             }
             _ => false,
@@ -660,7 +664,7 @@ impl Context {
         if rates.is_empty() {
             return None;
         }
-        Some(rates[segment.min(rates.len() - 1)])
+        Some(rates[segment.min(rates.len().saturating_sub(1))])
     }
 
     /// Applies the state transition and payoff function of one slot
@@ -675,14 +679,16 @@ impl Context {
         risk: &dyn RiskFactorProvider,
     ) -> Result<Decimal, EngineError> {
         let yf = day_count_fraction(state.status_date, slot.calc, self.dcc)?;
-        let accrual = yf * state.nominal_interest_rate * state.interest_calculation_base_amount;
+        let accrual =
+            (ck(yf) * state.nominal_interest_rate * state.interest_calculation_base_amount)
+                .get()?;
         let payoff = match slot.kind {
             Kind::InitialExchange => {
                 let notional = terms
                     .notional_principal
                     .ok_or(EngineError::MissingAttribute("notionalPrincipal"))?;
                 let premium = terms.premium_discount_at_ied.unwrap_or(Decimal::ZERO);
-                state.notional_principal = self.sgn * notional;
+                state.notional_principal = (ck(self.sgn) * notional).get()?;
                 state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
                 state.accrued_interest =
                     fixed_income::initial_accrued(terms, state, slot.calc, self.dcc, self.sgn)?;
@@ -691,56 +697,51 @@ impl Context {
                 state.interest_scaling_multiplier = interest_scaling;
                 state.notional_scaling_multiplier = notional_scaling;
                 state.interest_calculation_base_amount =
-                    initial_base_amount(terms, notional, self.sgn);
-                self.sgn * -(notional + premium)
+                    initial_base_amount(terms, notional, self.sgn)?;
+                (ck(self.sgn) * -(ck(notional) + premium)).get()?
             }
             Kind::PrincipalRedemption => {
-                state.accrued_interest += accrual;
+                // `DEC` segments (and scalar schedules): ordinary linear
+                // redemption, capped at the remaining notional (lam25).
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 let scheduled = self.scheduled_redemption(slot.segment, state);
-                if self.segment_increases(slot.segment) {
-                    // NAM semantics: the net principal portion of the period
-                    // payment is `Prnxt - Ipac`; when the period accrual
-                    // exceeds the payment the redemption turns negative and
-                    // the notional grows by the shortfall (nam17), capped at
-                    // the remaining notional magnitude (ann13). The accrued
-                    // interest enters the payoff by magnitude so the `RPL`
-                    // role mirrors the `RPA` economics.
-                    let net = state.notional_scaling_multiplier
-                        * (scheduled - self.sgn * state.accrued_interest);
-                    let payoff = if net.abs() > state.notional_principal.abs() {
-                        state.notional_principal
-                    } else {
-                        net
-                    };
-                    state.notional_principal -= payoff;
-                    if self.base_tracks_notional {
-                        state.interest_calculation_base_amount = state.notional_principal;
-                    }
-                    state.next_principal_redemption_payment = scheduled;
-                    payoff
-                } else {
-                    // LAM semantics: ordinary linear redemption, capped at
-                    // the remaining notional (lam25).
-                    let redemption = scheduled.min(state.notional_principal.abs());
-                    state.notional_principal -= self.sgn * redemption;
-                    if self.base_tracks_notional {
-                        state.interest_calculation_base_amount = state.notional_principal;
-                    }
-                    state.next_principal_redemption_payment =
-                        scheduled.min(state.notional_principal.abs());
-                    self.sgn * state.notional_scaling_multiplier * redemption
+                let redemption = scheduled.min(state.notional_principal.abs());
+                state.notional_principal =
+                    (ck(state.notional_principal) - ck(self.sgn) * redemption).get()?;
+                if self.base_tracks_notional {
+                    state.interest_calculation_base_amount = state.notional_principal;
                 }
+                state.next_principal_redemption_payment =
+                    scheduled.min(state.notional_principal.abs());
+                (ck(self.sgn) * state.notional_scaling_multiplier * redemption).get()?
+            }
+            Kind::PrincipalDrawing => {
+                // `INC` segments (techspec LAX functions table, `PI` row):
+                // `pof = sgn x (-1) x Nsc x Prnxt`, `Nt+ = Nt- + sgn x
+                // Prnxt`, the accrual and the `IPCB = NT` base follow the
+                // grown notional. Reported as `PD` (SI-002).
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
+                let drawn = self.scheduled_redemption(slot.segment, state);
+                state.notional_principal =
+                    (ck(state.notional_principal) + ck(self.sgn) * drawn).get()?;
+                if self.base_tracks_notional {
+                    state.interest_calculation_base_amount = state.notional_principal;
+                }
+                state.next_principal_redemption_payment = drawn;
+                (-ck(self.sgn) * state.notional_scaling_multiplier * drawn).get()?
             }
             Kind::InterestPayment => {
-                state.accrued_interest += accrual;
-                let payoff = state.interest_scaling_multiplier * state.accrued_interest;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
+                let payoff =
+                    (ck(state.interest_scaling_multiplier) * state.accrued_interest).get()?;
                 state.accrued_interest = Decimal::ZERO;
                 state.last_interest_payment_date = Some(slot.calc);
                 payoff
             }
             Kind::InterestCapitalization => {
-                state.accrued_interest += accrual;
-                state.notional_principal += state.accrued_interest;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
+                state.notional_principal =
+                    (ck(state.notional_principal) + state.accrued_interest).get()?;
                 state.accrued_interest = Decimal::ZERO;
                 if base_is_nt(terms) {
                     state.interest_calculation_base_amount = state.notional_principal;
@@ -748,12 +749,12 @@ impl Context {
                 Decimal::ZERO
             }
             Kind::InterestCalculationBaseFixing => {
-                state.accrued_interest += accrual;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 state.interest_calculation_base_amount = state.notional_principal;
                 Decimal::ZERO
             }
             Kind::ArrayRateReset => {
-                state.accrued_interest += accrual;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 match terms.array_fixed_variable {
                     Some(ArrayFixVar::Variable) => {
                         // The segment rate is the spread on top of the
@@ -772,7 +773,7 @@ impl Context {
                         let spread = self
                             .array_rate(terms, slot.segment)
                             .unwrap_or(terms.rate_spread.unwrap_or(Decimal::ZERO));
-                        state.nominal_interest_rate = observed * multiplier + spread;
+                        state.nominal_interest_rate = (ck(observed) * multiplier + spread).get()?;
                     }
                     // `F` and the attribute default: the segment rate is the
                     // new fixed nominal interest rate.
@@ -787,7 +788,7 @@ impl Context {
                 Decimal::ZERO
             }
             Kind::RateReset => {
-                state.accrued_interest += accrual;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 let code = terms
                     .market_object_code_of_rate_reset
                     .as_deref()
@@ -800,18 +801,18 @@ impl Context {
                         })?;
                 let multiplier = terms.rate_multiplier.unwrap_or(Decimal::ONE);
                 let spread = terms.rate_spread.unwrap_or(Decimal::ZERO);
-                state.nominal_interest_rate = observed * multiplier + spread;
+                state.nominal_interest_rate = (ck(observed) * multiplier + spread).get()?;
                 Decimal::ZERO
             }
             Kind::RateResetFixed => {
-                state.accrued_interest += accrual;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 state.nominal_interest_rate = terms
                     .next_reset_rate
                     .ok_or(EngineError::MissingAttribute("nextResetRate"))?;
                 Decimal::ZERO
             }
             Kind::ScalingIndexFixing => {
-                state.accrued_interest += accrual;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 let code = terms.market_object_code_of_scaling_index.as_deref().ok_or(
                     EngineError::MissingAttribute("marketObjectCodeOfScalingIndex"),
                 )?;
@@ -824,7 +825,7 @@ impl Context {
                 let deal_date_index = terms.scaling_index_at_contract_deal_date.ok_or(
                     EngineError::MissingAttribute("scalingIndexAtContractDealDate"),
                 )?;
-                let factor = observed / deal_date_index;
+                let factor = (ck(observed) / deal_date_index).get()?;
                 if scales_notional(terms.scaling_effect) {
                     state.notional_scaling_multiplier = factor;
                 }
@@ -834,18 +835,18 @@ impl Context {
                 Decimal::ZERO
             }
             Kind::Purchase => {
-                state.accrued_interest += accrual;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 let price = terms
                     .price_at_purchase_date
                     .ok_or(EngineError::MissingAttribute("priceAtPurchaseDate"))?;
-                self.sgn * -(price + state.accrued_interest)
+                (ck(self.sgn) * -(ck(price) + state.accrued_interest)).get()?
             }
             Kind::Termination => {
-                state.accrued_interest += accrual;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 let price = terms
                     .price_at_termination_date
                     .ok_or(EngineError::MissingAttribute("priceAtTerminationDate"))?;
-                let payoff = self.sgn * (price + state.accrued_interest);
+                let payoff = (ck(self.sgn) * (ck(price) + state.accrued_interest)).get()?;
                 state.notional_principal = Decimal::ZERO;
                 state.accrued_interest = Decimal::ZERO;
                 state.fee_accrued = Decimal::ZERO;
@@ -854,9 +855,10 @@ impl Context {
                 payoff
             }
             Kind::Maturity => {
-                let payoff = state.notional_scaling_multiplier * state.notional_principal
-                    + state.interest_scaling_multiplier * state.accrued_interest
-                    + state.fee_accrued;
+                let payoff = (ck(state.notional_scaling_multiplier) * state.notional_principal
+                    + ck(state.interest_scaling_multiplier) * state.accrued_interest
+                    + state.fee_accrued)
+                    .get()?;
                 state.notional_principal = Decimal::ZERO;
                 state.accrued_interest = Decimal::ZERO;
                 state.fee_accrued = Decimal::ZERO;
@@ -874,7 +876,7 @@ impl Context {
 /// `Ipcb` row: `t0 < IED` yields a zeroed calculation base): the redemption
 /// amount and scaling multipliers are already resolved from the terms, the
 /// monetary and rate states stay zero until `IED`.
-fn initial_state(ctx: &Context, terms: &ContractTerms) -> ContractState {
+fn initial_state(ctx: &Context, terms: &ContractTerms) -> Result<ContractState, EngineError> {
     let mut state = ContractState::initial(terms);
     // The scalar default first, then the array payment of the first segment
     // when `ARPRNXT` is present.
@@ -883,7 +885,7 @@ fn initial_state(ctx: &Context, terms: &ContractTerms) -> ContractState {
     let (interest_scaling, notional_scaling) = term_scaling_multipliers(terms);
     state.interest_scaling_multiplier = interest_scaling;
     state.notional_scaling_multiplier = notional_scaling;
-    state
+    Ok(state)
 }
 
 /// Builds the states-at-t0 of a progressed contract whose `IED` precedes the
@@ -897,7 +899,7 @@ fn progressed_initial(ctx: &Context, terms: &ContractTerms) -> Result<ContractSt
     let notional = terms
         .notional_principal
         .ok_or(EngineError::MissingAttribute("notionalPrincipal"))?;
-    state.notional_principal = ctx.sgn * notional;
+    state.notional_principal = (ck(ctx.sgn) * notional).get()?;
     state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
     // The scalar default first, then the array payment of the first segment
     // when `ARPRNXT` is present.
@@ -906,11 +908,11 @@ fn progressed_initial(ctx: &Context, terms: &ContractTerms) -> Result<ContractSt
     let (interest_scaling, notional_scaling) = term_scaling_multipliers(terms);
     state.interest_scaling_multiplier = interest_scaling;
     state.notional_scaling_multiplier = notional_scaling;
-    state.interest_calculation_base_amount = initial_base_amount(terms, notional, ctx.sgn);
+    state.interest_calculation_base_amount = initial_base_amount(terms, notional, ctx.sgn)?;
     state.accrued_interest = match terms.nominal_interest_rate {
         None => Decimal::ZERO,
         Some(_) => match terms.accrued_interest {
-            Some(accrued) => ctx.sgn * accrued,
+            Some(accrued) => (ck(ctx.sgn) * accrued).get()?,
             None => fixed_income::progressed_accrued(
                 &ctx.conventions(),
                 terms,
@@ -1071,17 +1073,10 @@ mod tests {
         assert_eq!(ips[16], t("2028-01-01T00:00:00"));
     }
 
-    /// An `INC` segment with a scheduled payment below the period accrual
-    /// amortizes negatively: with NT = 5000 at 8% `A365` the accrual of the
-    /// 31-day first period is 5000 x 0.08 x 31/365 = 33.9726027397260, the
-    /// scheduled `ARPRNXT = 30` falls short by 3.9726027397260, so the PR
-    /// payoff is -3.9726027397260 and the notional grows by the shortfall to
-    /// 5003.9726027397260.
-    #[test]
-    fn inc_segment_capitalizes_the_accrual_shortfall() {
-        let terms = terms(json!({
+    fn inc_terms(role: &str) -> ContractTerms {
+        terms(json!({
             "contractType": "LAX",
-            "contractRole": "RPA",
+            "contractRole": role,
             "statusDate": "2012-12-30T00:00:00",
             "initialExchangeDate": "2013-01-01T00:00:00",
             "maturityDate": "2013-11-01T00:00:00",
@@ -1095,30 +1090,74 @@ mod tests {
             "cycleOfInterestPayment": "P1ML0",
             "dayCountConvention": "A365",
             "interestCalculationBase": "NT"
-        }));
+        }))
+    }
+
+    /// An `INC` segment increases the principal (techspec LAX functions
+    /// table, `PI` row: `pof = sgn x (-1) x Nsc x Prnxt`, `Nt+ = Nt- + sgn x
+    /// Prnxt`; actus-core `ExoticLinearAmortizer` schedules `PI` for `INC`
+    /// and `PR` for `DEC`). The dictionary v1.4 event vocabulary has no
+    /// `PI`, so the increase is reported as `PD` (principal drawing), see
+    /// SI-002 in docs/spec-interpretations.md. With NT = 5000 at 8% `A365`,
+    /// each of the nine monthly drawings pays out `ARPRNXT = 30`, the
+    /// notional grows by 30, and interest accrues on the grown base
+    /// (`IPCB = NT`); the maturity repays 5000 + 9 x 30 = 5270.
+    #[test]
+    fn inc_segment_draws_principal() {
         let events = LaxEngine
-            .evaluate(&terms, &StateProvider::new())
+            .evaluate(&inc_terms("RPA"), &StateProvider::new())
             .expect("events");
-        let pr = events
+        assert!(events
             .iter()
-            .find(|e| e.event_type == EventType::PrincipalRedemption)
-            .expect("first PR");
-        assert_eq!(pr.time, t("2013-02-01T00:00:00"));
-        assert_close(pr.payoff, dec!(-3.9726027397260));
-        assert_close(pr.state.notional_principal, dec!(5003.9726027397260));
-        assert_close(pr.state.accrued_interest, dec!(33.9726027397260));
-        assert_eq!(
-            pr.state.next_principal_redemption_payment,
-            Decimal::from(30)
-        );
-        // The same-date IP still pays the period accrual (the dictionary
-        // sequence PR -> IP), so the total period cash is the ARPRNXT of 30.
+            .all(|e| e.event_type != EventType::PrincipalRedemption));
+        let drawings: Vec<&ContractEvent> = events
+            .iter()
+            .filter(|e| e.event_type == EventType::PrincipalDrawing)
+            .collect();
+        assert_eq!(drawings.len(), 9);
+        let first = drawings[0];
+        assert_eq!(first.time, t("2013-02-01T00:00:00"));
+        assert_eq!(first.payoff, dec!(-30));
+        assert_eq!(first.state.notional_principal, dec!(5030));
+        assert_eq!(first.state.interest_calculation_base_amount, dec!(5030));
+        assert_close(first.state.accrued_interest, dec!(33.9726027397260));
+        // The same-date IP pays the period accrual on the pre-drawing base.
         let ip = events
             .iter()
             .find(|e| e.event_type == EventType::InterestPayment)
             .expect("first IP");
+        assert_eq!(ip.time, t("2013-02-01T00:00:00"));
         assert_close(ip.payoff, dec!(33.9726027397260));
-        assert_eq!(ip.state.accrued_interest, Decimal::ZERO);
+        // The second period accrues on the grown notional: 5030 x 0.08 x 28/365.
+        let second_ip = events
+            .iter()
+            .filter(|e| e.event_type == EventType::InterestPayment)
+            .nth(1)
+            .expect("second IP");
+        assert_close(second_ip.payoff, dec!(30.8690410958904));
+        assert_eq!(drawings[8].state.notional_principal, dec!(5270));
+        let md = events.last().expect("MD");
+        assert_eq!(md.event_type, EventType::Maturity);
+        assert_eq!(md.payoff, dec!(5270));
+    }
+
+    /// The `RPL` mirror of an `INC` LAX negates every payoff and signed
+    /// state of the `RPA` contract (contract role sign convention).
+    #[test]
+    fn inc_segment_mirrors_under_rpl() {
+        let lender = LaxEngine
+            .evaluate(&inc_terms("RPA"), &StateProvider::new())
+            .expect("RPA");
+        let borrower = LaxEngine
+            .evaluate(&inc_terms("RPL"), &StateProvider::new())
+            .expect("RPL");
+        assert_eq!(lender.len(), borrower.len());
+        for (a, b) in lender.iter().zip(&borrower) {
+            assert_eq!(a.event_type, b.event_type);
+            assert_eq!(b.payoff, -a.payoff, "{:?} {}", a.event_type, a.time);
+            assert_eq!(b.state.notional_principal, -a.state.notional_principal);
+            assert_eq!(b.state.accrued_interest, -a.state.accrued_interest);
+        }
     }
 
     /// A pure-`DEC` LAX redeems the initial notional exactly: the sum of the

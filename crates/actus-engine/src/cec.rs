@@ -48,17 +48,20 @@ use chrono::NaiveDateTime;
 use rust_decimal::Decimal;
 
 use actus_model::{
-    ContractReference, ContractReferenceRole, ContractRole, ContractTerms, ContractType,
-    CreditEventType, EventType, GuaranteedExposure,
+    ContractReference, ContractReferenceRole, ContractTerms, ContractType, CreditEventType,
+    EventType,
 };
 
+use crate::common::contract_role_sign;
 use crate::credit_enhancement::{
-    covered_contract_value, credit_event_trigger, maturity_date, settlement_date,
+    covered_exposure, credit_event_trigger, event_state, maturity_date, settlement_date,
+    terminal_state,
 };
 use crate::engine::ContractEngine;
 use crate::event::ContractEvent;
+use crate::num::{self, ck};
 use crate::risk::RiskFactorProvider;
-use crate::state::ContractState;
+use crate::state::ContractStatus;
 use crate::EngineError;
 
 /// Implementation of the CEC contract type.
@@ -96,7 +99,7 @@ impl ContractEngine for CecEngine {
             ));
         }
 
-        let sign = cec_role_sign(terms.contract_role);
+        let sign = contract_role_sign(terms.contract_role);
         let maturity = maturity_date(terms, &covered)?;
         let covered_type = terms
             .credit_event_type_covered
@@ -108,8 +111,9 @@ impl ContractEngine for CecEngine {
         };
 
         let coverage = terms.coverage_of_credit_enhancement.unwrap_or(Decimal::ONE);
-        let exposure =
-            coverage * covered_exposure(&covered, trigger.time, terms.guaranteed_exposure, risk)?;
+        let exposure = (ck(coverage)
+            * covered_exposure(&covered, trigger.time, terms.guaranteed_exposure, risk)?)
+        .get()?;
         let collateral = covering_value(&covering, trigger.time, risk)?;
         let settlement_time = settlement_date(terms, trigger.time)?;
 
@@ -119,45 +123,17 @@ impl ContractEngine for CecEngine {
                 time: trigger.time,
                 payoff: Decimal::ZERO,
                 currency: terms.currency.clone(),
-                state: event_state(sign * exposure, trigger.time),
+                state: event_state((ck(sign) * exposure).get()?, trigger.time),
             },
             ContractEvent {
                 event_type: EventType::Settlement,
                 time: settlement_time,
-                payoff: sign * collateral.min(exposure),
+                payoff: (ck(sign) * collateral.min(exposure)).get()?,
                 currency: terms.currency.clone(),
-                state: event_state(Decimal::ZERO, settlement_time),
+                state: terminal_state(Decimal::ZERO, settlement_time, ContractStatus::Terminated),
             },
         ])
     }
-}
-
-/// The contract role sign of the CEC parent (dictionary Table 1): the
-/// protection buyer (`BUY`) carries `+1`, the protection seller (`SEL`)
-/// carries `-1`; other roles default to the buying orientation.
-fn cec_role_sign(role: Option<ContractRole>) -> Decimal {
-    match role {
-        Some(ContractRole::Sel) => -Decimal::ONE,
-        _ => Decimal::ONE,
-    }
-}
-
-/// The covered exposure `sum(n_i)` at the credit event time (techspec "CEC"
-/// states table, `Nt` initialisation).
-///
-/// Each covered contract is evaluated under its own contract role through
-/// its own engine; the parent role sign is applied by the caller after
-/// aggregation.
-fn covered_exposure(
-    covered: &[&ContractReference],
-    at: NaiveDateTime,
-    basis: Option<GuaranteedExposure>,
-    risk: &dyn RiskFactorProvider,
-) -> Result<Decimal, EngineError> {
-    covered
-        .iter()
-        .map(|reference| covered_contract_value(reference, at, basis, risk))
-        .sum()
 }
 
 /// The covering collateral value `sum(v_j)` at the credit event time, read
@@ -168,7 +144,7 @@ fn covering_value(
     at: NaiveDateTime,
     risk: &dyn RiskFactorProvider,
 ) -> Result<Decimal, EngineError> {
-    covering
+    let values = covering
         .iter()
         .map(|reference| {
             let object = reference
@@ -186,16 +162,8 @@ fn covering_value(
                 at: at.to_string(),
             })
         })
-        .sum()
-}
-
-/// Builds a post-event state carrying the given notional at the event time.
-fn event_state(notional: Decimal, time: NaiveDateTime) -> ContractState {
-    ContractState {
-        notional_principal: notional,
-        status_date: time,
-        ..ContractState::default()
-    }
+        .collect::<Result<Vec<Decimal>, EngineError>>()?;
+    num::sum(values)
 }
 
 /// Builds the zero-payoff maturity event (techspec "CEC" functions, `MD`:
@@ -206,7 +174,7 @@ fn maturity_event(terms: &ContractTerms, maturity: NaiveDateTime) -> ContractEve
         time: maturity,
         payoff: Decimal::ZERO,
         currency: terms.currency.clone(),
-        state: event_state(Decimal::ZERO, maturity),
+        state: terminal_state(Decimal::ZERO, maturity, ContractStatus::Matured),
     }
 }
 
@@ -388,6 +356,32 @@ mod tests {
         assert_eq!(events[1].time, t("2020-09-20T00:00:00"));
         assert_eq!(events[1].payoff, dec!(1000000));
         assert_eq!(events[1].state.notional_principal, Decimal::ZERO);
+    }
+
+    /// The terminal events close the contract like every other engine
+    /// (and the sibling CEG): the settlement terminates it, the maturity
+    /// without a trigger matures it, and the exercise leaves it active.
+    #[test]
+    fn terminal_events_report_the_closing_status() {
+        let terms = terms(base_terms("BUY", None));
+        let triggered = CecEngine
+            .evaluate(
+                &terms,
+                &risk_with_gold(
+                    "10000000",
+                    &[credit_event("US91282XYZ01", ContractPerformance::Default)],
+                ),
+            )
+            .expect("events");
+        assert_eq!(triggered[0].state.contract_status, ContractStatus::Active);
+        assert_eq!(
+            triggered[1].state.contract_status,
+            ContractStatus::Terminated
+        );
+        let matured = CecEngine
+            .evaluate(&terms, &risk_with_gold("10000000", &[]))
+            .expect("events");
+        assert_eq!(matured[0].state.contract_status, ContractStatus::Matured);
     }
 
     /// collateral06: coverage 0.7 scales the guaranteed exposure.

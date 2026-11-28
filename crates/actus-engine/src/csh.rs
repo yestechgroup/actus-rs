@@ -31,6 +31,7 @@ use crate::common::role_sign;
 use crate::daycount::normalize_timestamp;
 use crate::engine::ContractEngine;
 use crate::event::ContractEvent;
+use crate::num::ck;
 use crate::risk::RiskFactorProvider;
 use crate::state::ContractState;
 use crate::EngineError;
@@ -53,7 +54,7 @@ impl ContractEngine for CshEngine {
             .notional_principal
             .ok_or(EngineError::MissingAttribute("notionalPrincipal"))?;
         let mut state = ContractState::initial(terms);
-        state.notional_principal = role_sign(terms) * notional;
+        state.notional_principal = (ck(role_sign(terms)) * notional).get()?;
         let mut analyses: Vec<NaiveDateTime> = risk
             .observed_events()
             .into_iter()

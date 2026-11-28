@@ -45,6 +45,7 @@ use crate::event::ContractEvent;
 use crate::fixed_income::{
     self, interest_schedule, rate_reset_schedule, Conventions, RateReset, ScheduledEvent, Timing,
 };
+use crate::num::ck;
 use crate::risk::RiskFactorProvider;
 use crate::state::{ContractState, ContractStatus};
 use crate::EngineError;
@@ -147,7 +148,7 @@ impl ContractEngine for PamEngine {
             ctx.schedule(terms)?,
             terms,
             || progressed_initial(&ctx, terms),
-            || ContractState::initial(terms),
+            || Ok(ContractState::initial(terms)),
             |state, slot| ctx.apply(state, slot, terms, risk),
         )
     }
@@ -299,31 +300,35 @@ impl Context {
         risk: &dyn RiskFactorProvider,
     ) -> Result<Decimal, EngineError> {
         let yf = day_count_fraction(state.status_date, slot.calc, self.dcc)?;
-        let accrual = yf * state.nominal_interest_rate * state.notional_principal;
+        let accrual = (ck(yf) * state.nominal_interest_rate * state.notional_principal).get()?;
         let payoff = match slot.kind {
             Kind::InitialExchange => {
                 let notional = terms
                     .notional_principal
                     .ok_or(EngineError::MissingAttribute("notionalPrincipal"))?;
                 let premium = terms.premium_discount_at_ied.unwrap_or(Decimal::ZERO);
-                state.notional_principal = self.sgn * notional;
+                state.notional_principal = (ck(self.sgn) * notional).get()?;
                 state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
                 state.accrued_interest =
                     fixed_income::initial_accrued(terms, state, slot.calc, self.dcc, self.sgn)?;
-                self.sgn * -(notional + premium)
+                (ck(self.sgn) * -(ck(notional) + premium)).get()?
             }
             Kind::InterestPayment => {
-                let payoff = state.interest_scaling_multiplier * (state.accrued_interest + accrual);
+                let payoff = (state.interest_scaling_multiplier
+                    * (ck(state.accrued_interest) + accrual))
+                    .get()?;
                 state.accrued_interest = Decimal::ZERO;
                 payoff
             }
             Kind::InterestCapitalization => {
-                state.notional_principal += state.accrued_interest + accrual;
+                state.notional_principal = (ck(state.notional_principal)
+                    + (ck(state.accrued_interest) + accrual))
+                    .get()?;
                 state.accrued_interest = Decimal::ZERO;
                 Decimal::ZERO
             }
             Kind::RateReset => {
-                state.accrued_interest += accrual;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 let code = terms
                     .market_object_code_of_rate_reset
                     .as_deref()
@@ -336,11 +341,11 @@ impl Context {
                         })?;
                 let multiplier = terms.rate_multiplier.unwrap_or(Decimal::ONE);
                 let spread = terms.rate_spread.unwrap_or(Decimal::ZERO);
-                state.nominal_interest_rate = observed * multiplier + spread;
+                state.nominal_interest_rate = (ck(observed) * multiplier + spread).get()?;
                 Decimal::ZERO
             }
             Kind::RateResetFixed => {
-                state.accrued_interest += accrual;
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 state.nominal_interest_rate = terms
                     .next_reset_rate
                     .ok_or(EngineError::MissingAttribute("nextResetRate"))?;
@@ -350,14 +355,15 @@ impl Context {
                 let price = terms
                     .price_at_purchase_date
                     .ok_or(EngineError::MissingAttribute("priceAtPurchaseDate"))?;
-                state.accrued_interest += accrual;
-                self.sgn * -(price + state.accrued_interest)
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
+                (ck(self.sgn) * -(ck(price) + state.accrued_interest)).get()?
             }
             Kind::Termination => {
                 let price = terms
                     .price_at_termination_date
                     .ok_or(EngineError::MissingAttribute("priceAtTerminationDate"))?;
-                let payoff = self.sgn * (price + state.accrued_interest + accrual);
+                let payoff =
+                    (ck(self.sgn) * (ck(price) + state.accrued_interest + accrual)).get()?;
                 state.notional_principal = Decimal::ZERO;
                 state.accrued_interest = Decimal::ZERO;
                 state.fee_accrued = Decimal::ZERO;
@@ -365,9 +371,10 @@ impl Context {
                 payoff
             }
             Kind::Maturity => {
-                let payoff = state.notional_scaling_multiplier * state.notional_principal
-                    + state.interest_scaling_multiplier * state.accrued_interest
-                    + state.fee_accrued;
+                let payoff = (ck(state.notional_scaling_multiplier) * state.notional_principal
+                    + ck(state.interest_scaling_multiplier) * state.accrued_interest
+                    + state.fee_accrued)
+                    .get()?;
                 state.notional_principal = Decimal::ZERO;
                 state.accrued_interest = Decimal::ZERO;
                 state.fee_accrued = Decimal::ZERO;
@@ -390,12 +397,12 @@ fn progressed_initial(ctx: &Context, terms: &ContractTerms) -> Result<ContractSt
     let notional = terms
         .notional_principal
         .ok_or(EngineError::MissingAttribute("notionalPrincipal"))?;
-    state.notional_principal = ctx.sgn * notional;
+    state.notional_principal = (ck(ctx.sgn) * notional).get()?;
     state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
     state.accrued_interest = match terms.nominal_interest_rate {
         None => Decimal::ZERO,
         Some(_) => match terms.accrued_interest {
-            Some(accrued) => ctx.sgn * accrued,
+            Some(accrued) => (ck(ctx.sgn) * accrued).get()?,
             None => {
                 let accrual = fixed_income::progressed_accrued(
                     &ctx.conventions(),
