@@ -185,10 +185,12 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].state.contract_status, ContractStatus::Active);
 
+        // `quantity` defaults to 1, so the first missing attribute of an
+        // empty bag is the price.
         let empty = ContractTerms::new(ContractType::Com);
         assert!(matches!(
             ComEngine.evaluate(&empty, &StateProvider::new()),
-            Err(EngineError::MissingAttribute("quantity"))
+            Err(EngineError::MissingAttribute("priceAtPurchaseDate"))
         ));
         let mut raw = base_terms();
         raw.as_object_mut().unwrap().remove("priceAtPurchaseDate");

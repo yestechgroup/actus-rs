@@ -2,7 +2,7 @@
 //! `STK_*`).
 //!
 //! An equity position. The economic driver is the share count `quantity`
-//! (`QT`): every payoff multiplies the quantity by a per-share price, and
+//! (`QT`, dictionary default 1): every payoff multiplies the quantity by a per-share price, and
 //! the notional state carries the resulting position notional
 //! `sgn x QT x PPRD`. The dictionary lists `notionalPrincipal` as required
 //! for STK, but it is descriptive there (the position notional at entry);
@@ -93,9 +93,9 @@ pub(crate) fn evaluate_position(
     risk: &dyn RiskFactorProvider,
     dividends: Dividends,
 ) -> Result<Vec<ContractEvent>, EngineError> {
-    let quantity = terms
-        .quantity
-        .ok_or(EngineError::MissingAttribute("quantity"))?;
+    // `QT` defaults to 1 (dictionary `quantity` default); every STK case of
+    // the official testbed omits it.
+    let quantity = terms.quantity.unwrap_or(Decimal::ONE);
     let entry_price = terms
         .price_at_purchase_date
         .ok_or(EngineError::MissingAttribute("priceAtPurchaseDate"))?;
@@ -470,13 +470,39 @@ mod tests {
         );
     }
 
+    /// stk01: a stock without `quantity` takes the dictionary default
+    /// `QT = 1`, so the purchase pays the price itself.
+    #[test]
+    fn quantity_defaults_to_one() {
+        let events = StkEngine
+            .evaluate(
+                &terms(json!({
+                    "contractType": "STK",
+                    "contractID": "stk01",
+                    "contractRole": "RPA",
+                    "contractDealDate": "2012-12-28T00:00:00",
+                    "statusDate": "2012-12-30T00:00:00",
+                    "notionalPrincipal": "1000",
+                    "currency": "USD",
+                    "purchaseDate": "2013-01-01T00:00:00",
+                    "priceAtPurchaseDate": "1100",
+                    "endOfMonthConvention": "EOM"
+                })),
+                &StateProvider::new(),
+            )
+            .expect("stk01 evaluates");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, EventType::Purchase);
+        assert_eq!(events[0].payoff, dec!(-1100));
+    }
+
     /// Missing required attributes are reported.
     #[test]
     fn missing_required_attributes_are_reported() {
         let empty = ContractTerms::new(ContractType::Stk);
         assert!(matches!(
             StkEngine.evaluate(&empty, &StateProvider::new()),
-            Err(EngineError::MissingAttribute("quantity"))
+            Err(EngineError::MissingAttribute("priceAtPurchaseDate"))
         ));
         let mut raw = base_terms();
         raw.as_object_mut().unwrap().remove("priceAtPurchaseDate");
