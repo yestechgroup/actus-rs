@@ -296,3 +296,47 @@ Details of the choices:
   `MVO`) stay as they were.
 
 **Result.** STK 10/10, COM 4/4.
+
+---
+
+## SI-007: FXOUT settles gross by default, reported as `MD`; fxout10's `TD` sign is a testbed defect
+
+**Section.** "FXOUT: Foreign Exchange Outright" (techspec l. 2044–2105):
+`STD` (`DS = 'S'`), `STD^(1)` and `STD^(2)` (`DS = 'D'`); `TD` paying
+`POF_TD_STK = X · R(CNTRL) · PTD`. Dictionary `deliverySettlement`,
+default `D`.
+
+**Questions and readings.**
+
+1. *Which settlement applies when `DS` is unset?* The engine settled net
+   at the observed rate, which errors without an fx observation. The
+   dictionary default is `D`, so the techspec's gross `STD^(1)`/`STD^(2)`
+   apply.
+2. *What are the gross legs called?* The techspec names them `STD^(1)`
+   and `STD^(2)`; the testbed reports two `MD` events, one per currency.
+3. *When does the net `STD` settle, and at which rate?* The testbed:
+   at `MD + settlementPeriod`, at the rate observed at `MD`.
+4. *Is the `TD` payoff role-signed?* `POF_TD_STK = R(CNTRL) · PTD` is.
+
+**Chosen.** Gross legs by default, reported as `MD` in their own
+currencies (`R · NT` in `CUR`, `R · (−1) · NT2` in `CUR2`); the net `STD`
+at `MD + STP`, valued at `MD`; `TD` role-signed.
+
+**Evidence.**
+- *Default.* fxout01, fxout02 and fxout07 set no `DS` and expect the two
+  gross legs; without an fx observation the old net reading could not
+  even evaluate them.
+- *Naming (flip experiment).* Reporting the gross legs as `STD`, as the
+  techspec names them, fails fxout01, fxout02 and fxout07.
+- *Net settlement.* fxout03, 04, 05, 09, 11 and 12 settle at
+  `MD + STP` (`P1DL0`, `P5DL0`) with the rate dated `MD`.
+- *`TD` sign: a testbed defect.* fxout10 is `RPL` with `PTD = 100` and
+  expects `TD = +100`; the techspec gives `R(CNTRL) · PTD = −100`. The same
+  reference implementation signs the same function `POF_TD_STK` for STK
+  (stk05: `RPL`, `PTD = 3000`, `TD = −3000`) and COM (com04: `RPL`,
+  `TD = −2700`), and fxout10's own `PRD` is role-signed
+  (`R · (−1) · PPRD = −50`). An unsigned `TD` would pass fxout10 and change
+  no other FXOUT case: no FXOUT case contradicts it, but the techspec does,
+  and so do the reference's own STK and COM outputs. The engine keeps the
+  signed payoff; the FXOUT gate pins fxout10 as failing (11/12), and the
+  vendored file stays untouched.

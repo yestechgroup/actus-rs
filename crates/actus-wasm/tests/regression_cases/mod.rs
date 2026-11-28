@@ -56,9 +56,12 @@ pub const CASES: &[(&str, &str, &str, &str)] = &[
     ),
     (
         // The agreed settlement XA / NT2 divided by a zero second notional.
+        // Only the net cash settlement (DS = S) reads XA; the dictionary
+        // default DS = D settles both legs gross.
         "fxout_zero_second_notional",
         r#"{"contractType":"FXOUT","contractID":"x","contractRole":"RPA",
             "statusDate":"2016-01-01T00:00:00","currency":"EUR","currency2":"USD",
+            "deliverySettlement":"S",
             "notionalPrincipal":"1000000","notionalPrincipal2":"0",
             "exerciseAmount":"950000","initialExchangeDate":"2016-01-15T00:00:00",
             "maturityDate":"2016-07-15T00:00:00"}"#,
