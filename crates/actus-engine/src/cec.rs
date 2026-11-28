@@ -54,13 +54,14 @@ use actus_model::{
 
 use crate::common::contract_role_sign;
 use crate::credit_enhancement::{
-    covered_exposure, credit_event_trigger, maturity_date, settlement_date,
+    covered_exposure, credit_event_trigger, event_state, maturity_date, settlement_date,
+    terminal_state,
 };
 use crate::engine::ContractEngine;
 use crate::event::ContractEvent;
 use crate::num::{self, ck};
 use crate::risk::RiskFactorProvider;
-use crate::state::ContractState;
+use crate::state::ContractStatus;
 use crate::EngineError;
 
 /// Implementation of the CEC contract type.
@@ -129,7 +130,7 @@ impl ContractEngine for CecEngine {
                 time: settlement_time,
                 payoff: (ck(sign) * collateral.min(exposure)).get()?,
                 currency: terms.currency.clone(),
-                state: event_state(Decimal::ZERO, settlement_time),
+                state: terminal_state(Decimal::ZERO, settlement_time, ContractStatus::Terminated),
             },
         ])
     }
@@ -165,15 +166,6 @@ fn covering_value(
     num::sum(values)
 }
 
-/// Builds a post-event state carrying the given notional at the event time.
-fn event_state(notional: Decimal, time: NaiveDateTime) -> ContractState {
-    ContractState {
-        notional_principal: notional,
-        status_date: time,
-        ..ContractState::default()
-    }
-}
-
 /// Builds the zero-payoff maturity event (techspec "CEC" functions, `MD`:
 /// payoff `0.0`, `Nt(t+) = 0.0`).
 fn maturity_event(terms: &ContractTerms, maturity: NaiveDateTime) -> ContractEvent {
@@ -182,7 +174,7 @@ fn maturity_event(terms: &ContractTerms, maturity: NaiveDateTime) -> ContractEve
         time: maturity,
         payoff: Decimal::ZERO,
         currency: terms.currency.clone(),
-        state: event_state(Decimal::ZERO, maturity),
+        state: terminal_state(Decimal::ZERO, maturity, ContractStatus::Matured),
     }
 }
 
@@ -364,6 +356,32 @@ mod tests {
         assert_eq!(events[1].time, t("2020-09-20T00:00:00"));
         assert_eq!(events[1].payoff, dec!(1000000));
         assert_eq!(events[1].state.notional_principal, Decimal::ZERO);
+    }
+
+    /// The terminal events close the contract like every other engine
+    /// (and the sibling CEG): the settlement terminates it, the maturity
+    /// without a trigger matures it, and the exercise leaves it active.
+    #[test]
+    fn terminal_events_report_the_closing_status() {
+        let terms = terms(base_terms("BUY", None));
+        let triggered = CecEngine
+            .evaluate(
+                &terms,
+                &risk_with_gold(
+                    "10000000",
+                    &[credit_event("US91282XYZ01", ContractPerformance::Default)],
+                ),
+            )
+            .expect("events");
+        assert_eq!(triggered[0].state.contract_status, ContractStatus::Active);
+        assert_eq!(
+            triggered[1].state.contract_status,
+            ContractStatus::Terminated
+        );
+        let matured = CecEngine
+            .evaluate(&terms, &risk_with_gold("10000000", &[]))
+            .expect("events");
+        assert_eq!(matured[0].state.contract_status, ContractStatus::Matured);
     }
 
     /// collateral06: coverage 0.7 scales the guaranteed exposure.

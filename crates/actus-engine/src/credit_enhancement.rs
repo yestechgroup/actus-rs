@@ -21,7 +21,7 @@ use crate::num::{self, ck};
 use crate::pam::PamEngine;
 use crate::risk::{ObservedCreditEvent, RiskFactorProvider};
 use crate::schedule::{cycle_step, shift_business_day};
-use crate::state::ContractState;
+use crate::state::{ContractState, ContractStatus};
 use crate::EngineError;
 
 /// The engines a covered child may route through.
@@ -231,5 +231,27 @@ pub(crate) fn add_period(
             Ok(cycle_step(at, 1, &cycle, eomc)?)
         }
         _ => Err(invalid()),
+    }
+}
+
+/// A post-event state carrying the given notional at the event time.
+pub(crate) fn event_state(notional: Decimal, time: NaiveDateTime) -> ContractState {
+    ContractState {
+        notional_principal: notional,
+        status_date: time,
+        ..ContractState::default()
+    }
+}
+
+/// A terminal post-event state with an explicit lifetime status (`MD`
+/// matures, a settled credit event terminates).
+pub(crate) fn terminal_state(
+    notional: Decimal,
+    time: NaiveDateTime,
+    status: ContractStatus,
+) -> ContractState {
+    ContractState {
+        contract_status: status,
+        ..event_state(notional, time)
     }
 }

@@ -48,14 +48,15 @@ use actus_model::{
 use crate::common::contract_role_sign;
 use crate::common::stub_series;
 use crate::credit_enhancement::{
-    covered_exposure, credit_event_trigger, maturity_date, settlement_date,
+    covered_exposure, credit_event_trigger, event_state, maturity_date, settlement_date,
+    terminal_state,
 };
 use crate::daycount::{day_count_fraction, normalize_timestamp};
 use crate::engine::ContractEngine;
 use crate::event::{sort_events, ContractEvent};
 use crate::num::ck;
 use crate::risk::RiskFactorProvider;
-use crate::state::{ContractState, ContractStatus};
+use crate::state::ContractStatus;
 use crate::EngineError;
 
 /// Implementation of the CEG contract type.
@@ -221,23 +222,6 @@ fn fee_schedule(
         previous = calc;
     }
     Ok(schedule)
-}
-
-/// Builds a post-event state carrying the given notional at the event time.
-fn event_state(notional: Decimal, time: NaiveDateTime) -> ContractState {
-    ContractState {
-        notional_principal: notional,
-        status_date: time,
-        ..ContractState::default()
-    }
-}
-
-/// Builds a terminal post-event state with an explicit lifetime status.
-fn terminal_state(notional: Decimal, time: NaiveDateTime, status: ContractStatus) -> ContractState {
-    ContractState {
-        contract_status: status,
-        ..event_state(notional, time)
-    }
 }
 
 #[cfg(test)]
