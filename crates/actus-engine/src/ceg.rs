@@ -41,10 +41,11 @@ use rust_decimal::Decimal;
 use actus_model::enums::FeeBasis;
 use actus_model::{
     BusinessDayConvention, Calendar, ContractReference, ContractReferenceRole,
-    ContractReferenceType, ContractRole, ContractTerms, ContractType, CreditEventType,
-    DayCountConvention, EndOfMonthConvention, EventType,
+    ContractReferenceType, ContractTerms, ContractType, CreditEventType, DayCountConvention,
+    EndOfMonthConvention, EventType,
 };
 
+use crate::common::contract_role_sign;
 use crate::common::stub_series;
 use crate::credit_enhancement::{
     covered_exposure, credit_event_trigger, maturity_date, settlement_date,
@@ -82,7 +83,7 @@ impl ContractEngine for CegEngine {
                 "contract structure needs a covered contract reference".to_string(),
             ));
         }
-        let sign = ceg_role_sign(terms.contract_role);
+        let sign = contract_role_sign(terms.contract_role);
         let maturity = maturity_date(terms, &covered)?;
         let trigger = credit_event_trigger(
             risk,
@@ -170,15 +171,6 @@ fn covered_contracts(structure: &[ContractReference]) -> Vec<&ContractReference>
         .collect()
 }
 
-/// The contract role sign of the CEG parent (dictionary Table 1): the
-/// protection seller (`SEL`) carries `-1`, other roles default to `+1`.
-fn ceg_role_sign(role: Option<ContractRole>) -> Decimal {
-    match role {
-        Some(ContractRole::Sel) => -Decimal::ONE,
-        _ => Decimal::ONE,
-    }
-}
-
 /// The fee schedule `(emission time, guaranteed notional, fee amount)`
 /// triplets (techspec `FP`: `R(CNTRL) x FER x NT x Y` per `FEB`).
 ///
@@ -254,6 +246,7 @@ mod tests {
     use crate::risk::ObservedCreditEvent;
     use crate::risk::StateProvider;
     use actus_model::ContractPerformance;
+    use actus_model::ContractRole;
     use actus_model::GuaranteedExposure;
     use chrono::NaiveDateTime;
     use rust_decimal_macros::dec;

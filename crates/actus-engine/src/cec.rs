@@ -48,10 +48,11 @@ use chrono::NaiveDateTime;
 use rust_decimal::Decimal;
 
 use actus_model::{
-    ContractReference, ContractReferenceRole, ContractRole, ContractTerms, ContractType,
-    CreditEventType, EventType,
+    ContractReference, ContractReferenceRole, ContractTerms, ContractType, CreditEventType,
+    EventType,
 };
 
+use crate::common::contract_role_sign;
 use crate::credit_enhancement::{
     covered_exposure, credit_event_trigger, maturity_date, settlement_date,
 };
@@ -97,7 +98,7 @@ impl ContractEngine for CecEngine {
             ));
         }
 
-        let sign = cec_role_sign(terms.contract_role);
+        let sign = contract_role_sign(terms.contract_role);
         let maturity = maturity_date(terms, &covered)?;
         let covered_type = terms
             .credit_event_type_covered
@@ -131,16 +132,6 @@ impl ContractEngine for CecEngine {
                 state: event_state(Decimal::ZERO, settlement_time),
             },
         ])
-    }
-}
-
-/// The contract role sign of the CEC parent (dictionary Table 1): the
-/// protection buyer (`BUY`) carries `+1`, the protection seller (`SEL`)
-/// carries `-1`; other roles default to the buying orientation.
-fn cec_role_sign(role: Option<ContractRole>) -> Decimal {
-    match role {
-        Some(ContractRole::Sel) => -Decimal::ONE,
-        _ => Decimal::ONE,
     }
 }
 

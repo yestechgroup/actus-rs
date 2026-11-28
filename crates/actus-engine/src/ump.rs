@@ -42,10 +42,10 @@ use chrono::NaiveDateTime;
 use rust_decimal::Decimal;
 
 use actus_model::{
-    ContractRole, ContractTerms, ContractType, Cycle, DayCountConvention, EndOfMonthConvention,
-    EventType,
+    ContractTerms, ContractType, Cycle, DayCountConvention, EndOfMonthConvention, EventType,
 };
 
+use crate::common::role_sign;
 use crate::daycount::{day_count_fraction, normalize_timestamp};
 use crate::engine::ContractEngine;
 use crate::event::{sequence_rank, ContractEvent};
@@ -54,26 +54,6 @@ use crate::risk::RiskFactorProvider;
 use crate::schedule::cycle_step;
 use crate::state::{ContractState, ContractStatus};
 use crate::EngineError;
-
-/// The contract role sign of the market instrument engines (paper section
-/// 3.7 "Contract Role Sign Convention", Table 1).
-///
-/// The shared `role_sign` helper covers the fixed-income `RPA`/`RPL` pair;
-/// the contingent and market instrument engines (UMP, STK, COM, FXOUT) also
-/// face the short and seller orientations, which map to `-1` per Table 1
-/// (`RPL`, `RF`/`ST`, `PF`, `SEL`, `UDLM`). All other roles act as `+1`.
-pub(crate) fn position_sign(terms: &ContractTerms) -> Decimal {
-    match terms.contract_role {
-        Some(
-            ContractRole::Rpl
-            | ContractRole::Rf
-            | ContractRole::Pf
-            | ContractRole::Sel
-            | ContractRole::Udlm,
-        ) => -Decimal::ONE,
-        _ => Decimal::ONE,
-    }
-}
 
 /// Implementation of the UMP contract type.
 #[derive(Debug, Clone, Copy, Default)]
@@ -138,7 +118,7 @@ impl ContractEngine for UmpEngine {
             .ok_or(EngineError::MissingAttribute("dayCountConvention"))?;
         let t0 = ContractState::initial(terms).status_date;
         let termination = terms.termination_date.map(normalize_timestamp);
-        let sgn = position_sign(terms);
+        let sgn = role_sign(terms);
         let ctx = Context {
             dcc,
             sgn,

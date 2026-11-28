@@ -16,14 +16,32 @@ use crate::schedule::{cycle_step, generate_schedule, shift_business_day, MAX_SCH
 use crate::state::ContractState;
 use crate::EngineError;
 
-/// The contract role sign (techspec section "Contract Role Sign
-/// Convention").
-///
-/// `RPL` mirrors `RPA`: the notional state and the payoffs flip sign. All
-/// other roles act as `RPA` in the fixed income testbeds.
+/// The contract role sign `R(CNTRL)` of the terms' role (see
+/// [`contract_role_sign`]).
 pub fn role_sign(terms: &ContractTerms) -> Decimal {
-    match terms.contract_role {
-        Some(ContractRole::Rpl) => -Decimal::ONE,
+    contract_role_sign(terms.contract_role)
+}
+
+/// The contract role sign function `R(CNTRL)` (techspec section "Contract
+/// Role Sign Convention", table `tbl:cntrl`): `+1` for a claim, `-1` for an
+/// obligation. Every engine uses this one mapping.
+///
+/// - `-1`: `RPL`, `PFL`, `SEL`, `UDLM` (techspec table) and `PF` (pay fix);
+/// - `+1`: `RPA`, `RFL`, `BUY`, `COL`, `CNO`, `UDL`, `UDLP` (techspec table),
+///   `RF` (receive fix), and an unset role.
+///
+/// `RF`/`PF` are v1.4 dictionary roles the techspec table does not list;
+/// they sign like `RFL`/`PFL`, as in actus-core `ContractRoleConvention`.
+#[must_use]
+pub fn contract_role_sign(role: Option<ContractRole>) -> Decimal {
+    match role {
+        Some(
+            ContractRole::Rpl
+            | ContractRole::Pfl
+            | ContractRole::Pf
+            | ContractRole::Sel
+            | ContractRole::Udlm,
+        ) => -Decimal::ONE,
         _ => Decimal::ONE,
     }
 }

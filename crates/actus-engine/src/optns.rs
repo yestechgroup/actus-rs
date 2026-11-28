@@ -33,8 +33,9 @@ use chrono::NaiveDateTime;
 use rust_decimal::Decimal;
 
 use actus_model::enums::{OptionExerciseType, OptionType};
-use actus_model::{ContractRole, ContractTerms, ContractType, EventType};
+use actus_model::{ContractTerms, ContractType, EventType};
 
+use crate::common::contract_role_sign;
 use crate::daycount::normalize_timestamp;
 use crate::engine::ContractEngine;
 use crate::event::ContractEvent;
@@ -58,7 +59,7 @@ impl ContractEngine for OptnsEngine {
         terms: &ContractTerms,
         risk: &dyn RiskFactorProvider,
     ) -> Result<Vec<ContractEvent>, EngineError> {
-        let sign = role_sign(terms.contract_role);
+        let sign = contract_role_sign(terms.contract_role);
         let maturity = terms
             .maturity_date
             .or(terms.option_exercise_end_date)
@@ -172,19 +173,6 @@ fn call_put_intrinsic(underlying: Decimal, strike: Decimal) -> Result<Decimal, E
     (ck(call) + put).get()
 }
 
-/// The contract role sign of the option holder (dictionary Table 1): short
-/// positions carry `-1`, long/buyer positions carry `+1`.
-fn role_sign(role: Option<ContractRole>) -> Decimal {
-    match role {
-        Some(ContractRole::Rpl)
-        | Some(ContractRole::Rf)
-        | Some(ContractRole::Pf)
-        | Some(ContractRole::Sel)
-        | Some(ContractRole::Udlm) => -Decimal::ONE,
-        _ => Decimal::ONE,
-    }
-}
-
 /// Builds a post-event state carrying the given notional at the event time.
 fn event_state(notional: Decimal, time: NaiveDateTime, status: ContractStatus) -> ContractState {
     ContractState {
@@ -199,6 +187,7 @@ fn event_state(notional: Decimal, time: NaiveDateTime, status: ContractStatus) -
 mod tests {
     use super::*;
     use crate::risk::StateProvider;
+    use actus_model::ContractRole;
     use rust_decimal_macros::dec;
     use serde_json::json;
 

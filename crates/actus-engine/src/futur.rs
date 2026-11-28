@@ -20,10 +20,9 @@
 //! `S_t - PFUT`; the short roles (`SEL`, `RPL`, `ST`/`RF`, `PFL`, `UDLM`)
 //! carry `-1`.
 
-use rust_decimal::Decimal;
+use actus_model::{ContractTerms, ContractType, DeliverySettlement, EventType};
 
-use actus_model::{ContractRole, ContractTerms, ContractType, DeliverySettlement, EventType};
-
+use crate::common::contract_role_sign;
 use crate::daycount::normalize_timestamp;
 use crate::engine::ContractEngine;
 use crate::event::ContractEvent;
@@ -52,7 +51,7 @@ impl ContractEngine for FuturEngine {
                 "physical delivery is not implemented: FUTUR settles in cash only".to_string(),
             ));
         }
-        let sign = role_sign(terms.contract_role);
+        let sign = contract_role_sign(terms.contract_role);
         let maturity = terms
             .maturity_date
             .map(normalize_timestamp)
@@ -88,23 +87,11 @@ impl ContractEngine for FuturEngine {
     }
 }
 
-/// The contract role sign of the future position (dictionary Table 1): short
-/// positions carry `-1`, long positions carry `+1`.
-fn role_sign(role: Option<ContractRole>) -> Decimal {
-    match role {
-        Some(ContractRole::Rpl)
-        | Some(ContractRole::Rf)
-        | Some(ContractRole::Pf)
-        | Some(ContractRole::Sel)
-        | Some(ContractRole::Udlm) => -Decimal::ONE,
-        _ => Decimal::ONE,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::risk::StateProvider;
+    use actus_model::ContractRole;
     use chrono::NaiveDateTime;
     use rust_decimal_macros::dec;
     use serde_json::json;

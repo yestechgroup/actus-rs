@@ -45,6 +45,7 @@ use rust_decimal::Decimal;
 
 use actus_model::{ContractTerms, ContractType, EndOfMonthConvention, EventType};
 
+use crate::common::role_sign;
 use crate::daycount::normalize_timestamp;
 use crate::engine::ContractEngine;
 use crate::event::{sequence_rank, ContractEvent};
@@ -52,7 +53,6 @@ use crate::num::ck;
 use crate::risk::RiskFactorProvider;
 use crate::schedule::cycle_step;
 use crate::state::{ContractState, ContractStatus};
-use crate::ump::position_sign;
 use crate::EngineError;
 
 /// Implementation of the STK contract type.
@@ -99,7 +99,7 @@ pub(crate) fn evaluate_position(
     let entry_price = terms
         .price_at_purchase_date
         .ok_or(EngineError::MissingAttribute("priceAtPurchaseDate"))?;
-    let sgn = position_sign(terms);
+    let sgn = role_sign(terms);
     let t0 = ContractState::initial(terms).status_date;
     let ied = terms.initial_exchange_date.map(normalize_timestamp);
     let purchase = terms.purchase_date.map(normalize_timestamp);
