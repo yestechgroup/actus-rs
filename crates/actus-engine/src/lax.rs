@@ -60,7 +60,7 @@ use crate::fixed_income::{
 };
 use crate::num::ck;
 use crate::risk::RiskFactorProvider;
-use crate::schedule::{array_series, cycle_step};
+use crate::schedule::{array_series, cycle_step, MAX_SCHEDULE_ROLLS};
 use crate::state::{ContractState, ContractStatus};
 use crate::EngineError;
 
@@ -277,6 +277,15 @@ impl Context {
         }
         let maturity = match terms.maturity_date.map(normalize_timestamp) {
             Some(maturity) => maturity,
+            None if principal_array.is_some() => {
+                let (anchors, cycles) =
+                    principal_array
+                        .as_ref()
+                        .ok_or(EngineError::MissingAttribute(
+                            "arrayCycleAnchorDateOfPrincipalRedemption",
+                        ))?;
+                array_maturity(terms, notional, anchors, cycles, eomc)?
+            }
             None => {
                 let prnxt = terms.next_principal_redemption_payment.ok_or(
                     EngineError::MissingAttribute("nextPrincipalRedemptionPayment"),
@@ -931,6 +940,90 @@ fn progressed_initial(ctx: &Context, terms: &ContractTerms) -> Result<ContractSt
     Ok(state)
 }
 
+/// The maturity of an array-scheduled LAX without `maturityDate` (techspec
+/// LAX states, `Md`): the first schedule date `t` at which
+/// `N(t) = NT + sum_i (-1)^k ARPRNXT_i |s_i(t)|` reaches zero, where `s_i`
+/// is segment `i` of the principal schedule up to `t` and `k` is 0 for an
+/// `INC` and 1 for a `DEC` segment. Segment `i` rolls from `ARPRANX_i` by
+/// its cycle up to `ARPRANX_{i+1}`; the last segment rolls on until the
+/// notional is redeemed. A segment amount or direction past the end of its
+/// array takes the last element, as the schedule does.
+///
+/// # Errors
+/// [`EngineError::InvalidSchedule`] when the schedule never redeems the
+/// notional within `MAX_SCHEDULE_ROLLS` elements;
+/// [`EngineError::MissingAttribute`] without `ARPRNXT`.
+fn array_maturity(
+    terms: &ContractTerms,
+    notional: Decimal,
+    anchors: &[NaiveDateTime],
+    cycles: &[Cycle],
+    eomc: EndOfMonthConvention,
+) -> Result<NaiveDateTime, EngineError> {
+    let element = |values: &[Decimal], i: usize| {
+        values
+            .get(i)
+            .or_else(|| values.last())
+            .copied()
+            .ok_or(EngineError::MissingAttribute(
+                "arrayNextPrincipalRedemptionPayment",
+            ))
+    };
+    let payments = terms
+        .array_next_principal_redemption_payment
+        .as_deref()
+        .ok_or(EngineError::MissingAttribute(
+            "arrayNextPrincipalRedemptionPayment",
+        ))?;
+    let increases = |i: usize| {
+        terms
+            .array_increase_decrease
+            .as_deref()
+            .and_then(|d| d.get(i).or_else(|| d.last()))
+            .is_some_and(|d| *d == ArrayIncDec::Inc)
+    };
+    let mut outstanding = notional.abs();
+    let mut rolls: u64 = 0;
+    for (i, anchor) in anchors.iter().enumerate() {
+        let amount = element(payments, i)?.abs();
+        let next_anchor = anchors.get(i.saturating_add(1)).copied();
+        let cycle = cycles.get(i).or_else(|| cycles.last());
+        let mut index: u64 = 0;
+        loop {
+            let time = match cycle {
+                Some(cycle) if index > 0 => cycle_step(*anchor, index, cycle, eomc)?,
+                _ => *anchor,
+            };
+            if next_anchor.is_some_and(|next| time >= next) {
+                break;
+            }
+            outstanding = if increases(i) {
+                (ck(outstanding) + amount).get()?
+            } else {
+                (ck(outstanding) - amount).get()?
+            };
+            if outstanding <= Decimal::ZERO {
+                return Ok(normalize_timestamp(time));
+            }
+            rolls = rolls.saturating_add(1);
+            if rolls > MAX_SCHEDULE_ROLLS {
+                return Err(EngineError::InvalidSchedule(format!(
+                    "the principal redemption arrays do not redeem the notional within \
+                     {MAX_SCHEDULE_ROLLS} schedule elements"
+                )));
+            }
+            // A segment without a cycle is the single date ARPRANX_i.
+            if cycle.is_none() {
+                break;
+            }
+            index = index.saturating_add(1);
+        }
+    }
+    Err(EngineError::InvalidSchedule(
+        "the principal redemption arrays do not redeem the notional".to_string(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1404,5 +1497,51 @@ mod tests {
             LaxEngine.evaluate(&no_ied, &StateProvider::new()),
             Err(EngineError::MissingAttribute("initialExchangeDate"))
         ));
+    }
+
+    /// The LAX testbed's lax04 shape: 100 redeemed by 20 a year from 2021,
+    /// every array written as a bare scalar, no `maturityDate`.
+    fn lax04() -> ContractTerms {
+        terms(json!({
+            "contractType": "LAX",
+            "contractID": "lax04",
+            "statusDate": "2020-01-01T00:00:00",
+            "contractRole": "RPA",
+            "calendar": "NC",
+            "businessDayConvention": "SCF",
+            "endOfMonthConvention": "SD",
+            "currency": "EUR",
+            "contractDealDate": "2020-01-01T00:00:00",
+            "initialExchangeDate": "2020-01-02T00:00:00",
+            "notionalPrincipal": "100",
+            "arrayCycleAnchorDateOfInterestPayment": "2021-01-01T00:00:00",
+            "arrayCycleOfInterestPayment": "P1YL1",
+            "nominalInterestRate": "0.05",
+            "dayCountConvention": "30E360",
+            "arrayCycleAnchorDateOfPrincipalRedemption": "2021-01-01T00:00:00",
+            "arrayCycleOfPrincipalRedemption": "P1YL1",
+            "arrayNextPrincipalRedemptionPayment": 20,
+            "arrayIncreaseDecrease": "DEC"
+        }))
+    }
+
+    /// lax04: without `MD` the maturity is the first date the array
+    /// schedule redeems the notional to zero (techspec LAX states, `Md`):
+    /// the fifth yearly redemption of 20, 2025-01-01, where the `MD` event
+    /// repays the last 20.
+    #[test]
+    fn lax04_maturity_follows_from_the_array_schedule() {
+        let events = LaxEngine
+            .evaluate(&lax04(), &StateProvider::new())
+            .expect("lax04 evaluates");
+        let last = events.last().expect("events");
+        assert_eq!(last.event_type, EventType::Maturity);
+        assert_eq!(last.time, t("2025-01-01T00:00:00"));
+        assert_eq!(last.payoff, dec!(20));
+        let redemptions = events
+            .iter()
+            .filter(|e| e.event_type == EventType::PrincipalRedemption)
+            .count();
+        assert_eq!(redemptions, 4);
     }
 }
