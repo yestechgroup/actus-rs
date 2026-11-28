@@ -235,13 +235,15 @@ pub struct ContractTerms {
     )]
     pub array_rate: Option<Vec<Decimal>>,
     /// ACTUS attribute `ARFIXVAR` — Array Fixed Variable (dictionary
-    /// `arrayFixedVariable`). Defines the meaning of [`ContractTerms::array_rate`].
+    /// `arrayFixedVariable`, type `Enum[]`). Element `i` defines the meaning
+    /// of element `i` of [`ContractTerms::array_rate`] (#44).
     #[serde(
         rename = "arrayFixedVariable",
         default,
+        deserialize_with = "crate::serde_helpers::one_or_many_option::deserialize",
         skip_serializing_if = "Option::is_none"
     )]
-    pub array_fixed_variable: Option<ArrayFixVar>,
+    pub array_fixed_variable: Option<Vec<ArrayFixVar>>,
     /// ACTUS attribute `IPCBANX` — Cycle Anchor Date Of Interest Calculation Base.
     #[serde(
         rename = "cycleAnchorDateOfInterestCalculationBase",
@@ -1425,7 +1427,7 @@ mod tests {
         );
         assert_eq!(
             terms.array_fixed_variable,
-            Some(crate::enums::ArrayFixVar::Fixed)
+            Some(vec![crate::enums::ArrayFixVar::Fixed])
         );
         let presence: Vec<(&str, bool)> = terms
             .presence()
@@ -1433,6 +1435,30 @@ mod tests {
             .filter(|(_, set)| *set)
             .collect();
         assert_eq!(presence.len(), 11);
+    }
+
+    /// #44: `arrayFixedVariable` is `Enum[]`, one `F`/`V` per rate segment,
+    /// in either the acronym or the description spelling (lax17, lax18).
+    #[test]
+    fn array_fixed_variable_is_an_array() {
+        use crate::enums::ArrayFixVar::{Fixed, Variable};
+        let terms: ContractTerms = serde_json::from_value(serde_json::json!({
+            "contractType": "LAX",
+            "arrayFixedVariable": ["F", "V"]
+        }))
+        .expect("issue #44 reproduction parses");
+        assert_eq!(terms.array_fixed_variable, Some(vec![Fixed, Variable]));
+        let testbed: ContractTerms = serde_json::from_value(serde_json::json!({
+            "contractType": "LAX",
+            "arrayFixedVariable": ["VAR", "VAR", "FIX"]
+        }))
+        .expect("testbed spelling parses");
+        assert_eq!(
+            testbed.array_fixed_variable,
+            Some(vec![Variable, Variable, Fixed])
+        );
+        let wire = serde_json::to_value(&terms).expect("wire");
+        assert_eq!(wire["arrayFixedVariable"], serde_json::json!(["F", "V"]));
     }
 
     /// The LAX testbed writes one-segment arrays as bare scalars (lax01..11,
@@ -1450,7 +1476,8 @@ mod tests {
             "arrayIncreaseDecrease": "DEC",
             "arrayCycleAnchorDateOfRateReset": "2022-01-01",
             "arrayCycleOfRateReset": "P1YL0",
-            "arrayRate": "0.06"
+            "arrayRate": "0.06",
+            "arrayFixedVariable": "FIX"
         }))
         .expect("singleton arrays parse");
         let t = |s: &str| crate::serde_helpers::parse_timestamp(s).unwrap();
@@ -1483,6 +1510,10 @@ mod tests {
             Some(vec![Cycle::parse("P1YL0").unwrap()])
         );
         assert_eq!(terms.array_rate, Some(vec![Decimal::new(6, 2)]));
+        assert_eq!(
+            terms.array_fixed_variable,
+            Some(vec![crate::enums::ArrayFixVar::Fixed])
+        );
         let float: ContractTerms = serde_json::from_value(serde_json::json!({
             "contractType": "LAX",
             "arrayNextPrincipalRedemptionPayment": 2.5
