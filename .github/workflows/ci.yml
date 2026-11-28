@@ -17,6 +17,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run cargo test
         run: cargo test --workspace
+      - name: Check the vendored testbeds against their pinned hashes
+        run: scripts/check-vendored-testbeds.sh
 
   lint:
     runs-on: ubuntu-latest
