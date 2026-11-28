@@ -447,3 +447,44 @@ Their payoffs and notionals match SI-002's amounts, so the uncapped
 techspec `PI` row is confirmed too (no case draws more than the
 outstanding notional, so the cap question itself stays undecided by
 testbed). This settles the label question SI-002 left open for #37.
+
+---
+
+## SI-010: SWPPV reports per-leg interest (`IPFX`, `IPFL`) when delivered, net `IP` when cash-settled
+
+**Section.** SWPPV schedule and functions (techspec l. 2107–2235): `IP`
+when `DS = 'S'`; `IP^(fix)` and `IP^(var)` when `DS = 'D'`; the extension
+tokens `IPFX`/`IPFL` (SI-005). SWAPS schedule (l. 2240 ff.).
+
+**Question.** How should the engine report a plain vanilla swap's interest:
+always net, as the paper-derived engine does, or per leg?
+
+**Readings.**
+
+1. Always one net `IP` (the paper; simplest for consumers).
+2. Per the techspec and the testbed: one net `IP` when `DS = 'S'`, and the
+   two leg payments `IPFX` (`R · (Ipac1 + Y · IPNR · Nt)`) and `IPFL`
+   (`R · (Ipac2 − Y · Ipnr · Nt)`) when `DS = 'D'`, the dictionary
+   default.
+
+**Chosen.** Reading 2.
+
+**Evidence.**
+- *Testbed.* The 10 `DS = 'D'` cases (swppv01–05, 08, 09, 12–14) expect 45
+  `IPFX` and 45 `IPFL` events, `IPFX` before `IPFL` on each date; the 4
+  `DS = 'S'` cases (swppv06, 07, 10, 11) expect a net `IP`.
+- *SWAPS consistency.* The SWAPS testbed (11/11) already follows the same
+  rule for composed legs: congruent leg events merge into one net event for
+  cash settlement and stay separate for delivery. Per-leg SWPPV interest
+  under `D` is the same rule applied to the two interest legs of the
+  standalone swap.
+- *Consumers.* The wasm API serializes event types by acronym, so `IPFX`
+  and `IPFL` reach the Explorer as two event types next to `IP`, with the
+  identifiers `interestPaymentFixedLeg` and `interestPaymentFloatingLeg`.
+  A consumer that wants the net amount sums the two payoffs of a date. The
+  Explorer needs labels for the two tokens (#14).
+
+**Status.** The decision is recorded. The engine does not implement it
+yet: SWPPV needs the techspec's standalone contract (`Nt`, `Ipnr` from
+`IPNR2`, `Ipac1`, `Ipac2`, the `RF`/`PF` roles). That is #49, and the SWPPV
+gate pins 0/14 until then.

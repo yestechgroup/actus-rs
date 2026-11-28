@@ -287,6 +287,15 @@ pub fn evaluate_ann(
     evaluate_family(terms, risk, Family::Ann)
 }
 
+/// The contract types the oracle evaluates (its [`Family`] scope), for the
+/// verification tier table.
+pub const COVERED_TYPES: [ContractType; 4] = [
+    ContractType::Pam,
+    ContractType::Lam,
+    ContractType::Nam,
+    ContractType::Ann,
+];
+
 /// The fixed-income contract family the oracle evaluates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Family {
@@ -1194,6 +1203,14 @@ fn observe(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn covered_types_are_exactly_the_family_scope() {
+        for ct in ContractType::ALL.iter().copied() {
+            let ok = Family::of(&ContractTerms::new(ct)).is_ok();
+            assert_eq!(ok, COVERED_TYPES.contains(&ct), "{ct}");
+        }
+    }
     use super::*;
     use std::str::FromStr;
 

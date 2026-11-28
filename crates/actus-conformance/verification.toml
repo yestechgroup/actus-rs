@@ -1,0 +1,112 @@
+# Verification tiers per contract type (yestechgroup/actus-rs#19).
+#
+# Tiers:
+#   A    official testbed, all cases passing, plus the independent oracle
+#        and its 2048-case differential corpus (`src/oracle.rs`)
+#   B    official testbed, all cases passing except documented testbed
+#        defects (`known_defects`, each with a docs/spec-interpretations.md
+#        entry)
+#   C    no complete official testbed: hand-computed unit tests only, or a
+#        testbed the engine does not pass yet (`issue` names the work)
+#   none no engine
+#
+# `tests/verification.rs` checks this table against reality on every CI
+# run: every engine type is listed; each listed testbed exists, carries the
+# type and has exactly `passing` of `cases` passing; the failing cases are
+# exactly `known_defects` for tier B (none for tier A); tier A has the
+# oracle; tier C names its issue. The `report` binary and the README render
+# it.
+
+[PAM]
+tier = "A"
+testbeds = "pam:25/25"
+oracle = true
+
+[LAM]
+tier = "A"
+testbeds = "lam:31/31"
+oracle = true
+
+[NAM]
+tier = "A"
+testbeds = "nam:22/22"
+oracle = true
+
+[ANN]
+tier = "A"
+testbeds = "ann:31/31, ad0:0/1"
+oracle = true
+# ad0 expects an AD event its inputs do not define.
+known_defects = "ad0/ann01"
+defect_note = "SI-009"
+
+[LAX]
+tier = "B"
+testbeds = "lax:18/18"
+note = "also replayed against the LAM testbed and the LAM oracle (tests/lax_parity.rs)"
+
+[CLM]
+tier = "B"
+testbeds = "clm:15/15"
+
+[CSH]
+tier = "B"
+testbeds = "csh:4/4"
+
+[SWAPS]
+tier = "B"
+testbeds = "swaps:11/11"
+
+[CEC]
+tier = "B"
+testbeds = "cec:15/15"
+
+[STK]
+tier = "B"
+testbeds = "stk:10/10"
+
+[COM]
+tier = "B"
+testbeds = "com:4/4"
+
+[FXOUT]
+tier = "B"
+testbeds = "fxout:11/12"
+# fxout10 expects an unsigned TD for RPL; the techspec signs POF_TD_STK.
+known_defects = "fxout/fxout10"
+defect_note = "SI-007"
+
+[OPTNS]
+tier = "B"
+testbeds = "optns:23/23"
+
+[FUTUR]
+tier = "B"
+testbeds = "futur:14/14"
+
+[UMP]
+tier = "B"
+testbeds = "ump:9/9"
+
+[CAPFL]
+tier = "B"
+testbeds = "capfl:4/4"
+
+[CEG]
+tier = "C"
+testbeds = "ceg:0/14"
+issue = 48
+
+[SWPPV]
+tier = "C"
+testbeds = "swppv:0/14"
+issue = 49
+
+[BCS]
+tier = "none"
+
+[CDSWP]
+tier = "none"
+
+[MAR]
+tier = "none"

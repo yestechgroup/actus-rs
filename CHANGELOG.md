@@ -48,6 +48,10 @@ Everything since the crates were imported from `onboarding-os`.
   loader, the `report` binary and the behaviour snapshot cover all 19
   testbeds, and each new testbed has a gate that pins its exact passing
   cases.
+- `crates/actus-conformance/verification.toml`: the verification tier of
+  every contract type (#19), checked against the testbeds in CI
+  (`tests/verification.rs`), rendered in the README and printed by
+  `report` (`report --tiers` for the Markdown).
 - `EventType` gains the testbed-attested extensions `PI`, `IPFX` and `IPFL`,
   generated from `crates/actus-model/extensions/event-types.json`, with
   `EventType::DICTIONARY`, `EventType::EXTENSIONS` and `is_dictionary()`
@@ -75,6 +79,8 @@ Everything since the crates were imported from `onboarding-os`.
   `tmax`; the wasm scenario gains `analysisHorizon`. Open-ended schedules
   (STK dividends, UMP interest) without a termination or a horizon are an
   error instead of being silently cut.
+- LAX `INC` segments are reported as `PI` instead of `PD` (SI-011,
+  superseding SI-002).
 - `ContractEngine::sequence_rank` lets an engine order same-day events
   differently; only CLM moves `XD` before `IP`.
 - `ContractTerms::array_fixed_variable` is an `Option<Vec<ArrayFixVar>>`,
