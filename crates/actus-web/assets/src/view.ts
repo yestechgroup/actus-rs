@@ -107,6 +107,8 @@ const EVENT_LABELS: Record<string, string> = {
   XD: 'Exercise',
   CE: 'Credit Event',
   IPCI: 'Interest Capitalization',
+  IPFX: 'Interest Payment Fixed Leg',
+  IPFL: 'Interest Payment Floating Leg',
   PY: 'Penalty',
   PI: 'Principal Increase',
   AD: 'Analysis Date',
@@ -118,6 +120,8 @@ export function eventKind(eventType: string): string {
       return 'ied';
     case 'IP':
     case 'IPCI':
+    case 'IPFX':
+    case 'IPFL':
       return 'ip';
     case 'PR':
     case 'PP':

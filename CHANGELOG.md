@@ -59,6 +59,8 @@ Everything since the crates were imported from `onboarding-os`.
 
 ### Changed
 
+- SWPPV no longer accepts a `contractStructure`; a swap composed of leg
+  contracts is SWAPS. `RFL`/`PFL` remain accepted as synonyms of `RF`/`PF`.
 - Licensed under MIT (root `LICENSE`).
 - Shared fixed-income helpers and the fixed-income event loop moved into
   `actus-engine::fixed_income`.
@@ -89,6 +91,16 @@ Everything since the crates were imported from `onboarding-os`.
 
 ### Fixed
 
+- CEG against its official testbed, 0/14 → 13/14 (#48, SI-012): a `PRD`
+  purchase event; `CID` references match credit events by identifier and
+  guarantee the contract's own `NT`; every state carries the coverage
+  `CECV`; `STD` settles the exercise amount plus the accrued fee. The
+  remaining case, guarantee14, expects a truncated `STD`.
+- SWPPV re-derived as the techspec's standalone contract, 0/14 → 13/14
+  (#49, #5, SI-010, SI-013 to SI-016): `RF`/`PF` roles, the floating rate
+  from `nominalInterestRate2`, per-leg `IPFX`/`IPFL` interest when
+  delivered and a net `IP` when cash-settled, `PRD` and `TD`, no principal
+  exchange. The remaining case, swppv13, expects an unsigned `TD`.
 - The hand-tested types against their official testbeds (SI-006 to
   SI-009):
   - STK and COM: `quantity` defaults to 1, no notional state, an optional

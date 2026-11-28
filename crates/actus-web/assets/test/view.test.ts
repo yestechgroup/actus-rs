@@ -45,7 +45,7 @@ const PAM: EventDto[] = [
 describe('eventKind', () => {
   it('groups event types into the timeline lanes', () => {
     expect(eventKind('IED')).toBe('ied');
-    expect(['IP', 'IPCI'].map(eventKind)).toEqual(['ip', 'ip']);
+    expect(['IP', 'IPCI', 'IPFX', 'IPFL'].map(eventKind)).toEqual(['ip', 'ip', 'ip', 'ip']);
     expect(['PR', 'PP', 'PY', 'PI'].map(eventKind)).toEqual(['pr', 'pr', 'pr', 'pr']);
     expect(eventKind('MD')).toBe('md');
     expect(['RR', 'FP', 'XYZ', ''].map(eventKind)).toEqual(['other', 'other', 'other', 'other']);

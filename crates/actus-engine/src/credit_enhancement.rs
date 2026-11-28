@@ -71,18 +71,21 @@ pub(crate) fn credit_event_trigger(
     covered_type: CreditEventType,
     maturity: NaiveDateTime,
 ) -> Option<ObservedCreditEvent> {
-    let covered_ids: Vec<Option<&String>> = covered
+    // `contract_identifier` covers both reference shapes: an embedded
+    // contract (`CNT`) and an identifier alone (`CID`, guarantee01-08).
+    let covered_ids: Vec<&str> = covered
         .iter()
-        .map(|reference| {
-            reference
-                .embedded_contract()
-                .and_then(|object| object.contract_id.as_ref())
-        })
+        .filter_map(|reference| reference.contract_identifier())
         .collect();
     risk.observed_credit_events()
         .into_iter()
         .filter(|event| event.time <= maturity)
-        .filter(|event| covered_ids.contains(&event.contract_id.as_ref()))
+        .filter(|event| {
+            event
+                .contract_id
+                .as_deref()
+                .is_some_and(|id| covered_ids.contains(&id))
+        })
         .filter(|event| event.performance.map(|p| p.as_token()) == Some(covered_type.as_token()))
         .min_by_key(|event| event.time)
 }
