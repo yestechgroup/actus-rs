@@ -197,7 +197,10 @@ pub(crate) fn settlement_date(
 /// Adds an ISO 8601 period (`P<n>D|W|M|Y`) to a timestamp.
 ///
 /// Days and weeks add calendar durations; months and years step through the
-/// cycle machinery with the end of month convention applied.
+/// cycle machinery with the end of month convention applied. A cycle-style
+/// stub suffix (`L0`, `L1`, `R0`, ...: `P5DL0`) is accepted and ignored:
+/// the FXOUT and CEG testbeds write periods that way, and a stub has no
+/// meaning for a single period (known quirk 10, `vendor/actus/README.md`).
 pub(crate) fn add_period(
     at: NaiveDateTime,
     raw: &str,
@@ -207,7 +210,18 @@ pub(crate) fn add_period(
     let invalid = || EngineError::InvalidTransition(format!("invalid settlementPeriod: {raw}"));
     let body = upper.strip_prefix('P').ok_or_else(invalid)?;
     let digits: String = body.chars().take_while(|c| c.is_ascii_digit()).collect();
-    let period = &body[digits.len()..];
+    let rest = &body[digits.len()..];
+    let period = match rest.char_indices().nth(1) {
+        // `<unit>` alone, or `<unit>` plus a one-letter stub and one digit.
+        None => rest,
+        Some((split, _)) => {
+            let suffix = rest.as_bytes().get(split..).unwrap_or_default();
+            match suffix {
+                [b'L' | b'R', digit] if digit.is_ascii_digit() => &rest[..split],
+                _ => return Err(invalid()),
+            }
+        }
+    };
     let n: i64 = digits.parse().map_err(|_| invalid())?;
     match period {
         "D" => at
@@ -252,5 +266,38 @@ pub(crate) fn terminal_state(
     ContractState {
         contract_status: status,
         ..event_state(notional, time)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actus_model::ContractType;
+
+    fn t(s: &str) -> NaiveDateTime {
+        NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").expect("timestamp")
+    }
+
+    /// The dictionary types `settlementPeriod` as a Period; the FXOUT and
+    /// CEG testbeds also write it in cycle notation with a stub suffix
+    /// (`P1DL0`, `P5DL0`, 7 cases), which adds the same period.
+    #[test]
+    fn periods_accept_the_cycle_notation_of_the_testbeds() {
+        let terms = ContractTerms::new(ContractType::Ceg);
+        let at = t("2015-01-10T00:00:00");
+        for (raw, expected) in [
+            ("P5D", "2015-01-15T00:00:00"),
+            ("P5DL0", "2015-01-15T00:00:00"),
+            ("P1DL0", "2015-01-11T00:00:00"),
+            ("P1DL1", "2015-01-11T00:00:00"),
+            ("P2W", "2015-01-24T00:00:00"),
+            ("P1ML1", "2015-02-10T00:00:00"),
+            ("P0D", "2015-01-10T00:00:00"),
+        ] {
+            assert_eq!(add_period(at, raw, &terms).expect(raw), t(expected), "{raw}");
+        }
+        for bad in ["5D", "PD", "P5X", "P5DL", "P5DLX", "P5DL0X"] {
+            assert!(add_period(at, bad, &terms).is_err(), "{bad}");
+        }
     }
 }

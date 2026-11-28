@@ -107,6 +107,10 @@ in-Rust oracle only (`crates/actus-conformance/src/oracle.rs`, `tests/differenti
    the dictionary lacks. `actus-model` accepts both spellings and carries the
    extra attribute, as it does `fixingDays`. A model test checks that no
    testbed key is dropped silently.
+10. The dictionary types `settlementPeriod` as a Period (`P5D`), but the
+    FXOUT and CEG testbeds also write it in **cycle notation with a stub
+    suffix**: `P1DL0` (5 cases), `P5DL0` (2 cases). A stub means nothing for
+    a single period; the engine accepts and ignores the suffix.
 
 ## Purpose
 
