@@ -122,7 +122,13 @@ impl ContractEngine for CapflEngine {
                         .abs())
                 .get()?,
                 currency: terms.currency.clone(),
-                state: uncapped_event.state.clone(),
+                // CAPFL carries no notional or rate of its own (techspec
+                // CAPFL states: Md, Ipac, Prf, Sd), and its accrual is zero
+                // right after a merged IP.
+                state: ContractState {
+                    status_date: uncapped_event.time,
+                    ..ContractState::default()
+                },
             });
         }
         let terminal = last_time.ok_or(EngineError::InvalidTransition(
@@ -494,5 +500,60 @@ mod tests {
             error,
             EngineError::MissingAttribute("initialExchangeDate")
         ));
+    }
+
+    /// The CAPFL testbed's capfl01: a bought 7 % cap on a quarterly
+    /// floating PAM observing LIBORUSD1M.
+    fn capfl01() -> (ContractTerms, StateProvider) {
+        let terms: ContractTerms = serde_json::from_value(serde_json::json!({
+            "contractType": "CAPFL",
+            "contractID": "capfl01",
+            "contractRole": "BUY",
+            "contractStructure": [{
+                "object": {
+                    "contractType": "PAM",
+                    "contractID": "capfl-underlying",
+                    "contractDealDate": "2012-12-28T00:00:00",
+                    "initialExchangeDate": "2013-01-01T00:00:00",
+                    "currency": "USD",
+                    "statusDate": "2012-12-30T00:00:00",
+                    "notionalPrincipal": "1000",
+                    "dayCountConvention": "A365",
+                    "nominalInterestRate": "0.05",
+                    "maturityDate": "2014-01-01T00:00:00",
+                    "cycleAnchorDateOfInterestPayment": "2013-04-01T00:00:00",
+                    "cycleOfInterestPayment": "P3ML1",
+                    "cycleAnchorDateOfRateReset": "2013-04-01T00:00:00",
+                    "cycleOfRateReset": "P3ML1",
+                    "marketObjectCodeOfRateReset": "LIBORUSD1M"
+                },
+                "referenceType": "CNT",
+                "referenceRole": "UDL"
+            }],
+            "currency": "USD",
+            "contractDealDate": "2012-12-28T00:00:00",
+            "statusDate": "2012-12-30T00:00:00",
+            "lifeCap": "0.07"
+        }))
+        .expect("capfl01 terms");
+        let risk = StateProvider::new()
+            .with_rate("LIBORUSD1M", t("2013-04-01T00:00:00"), dec!(0.1))
+            .with_rate("LIBORUSD1M", t("2013-07-01T00:00:00"), dec!(0.01))
+            .with_rate("LIBORUSD1M", t("2013-10-01T00:00:00"), dec!(0.04));
+        (terms, risk)
+    }
+
+    /// capfl01: CAPFL has no notional or rate state of its own (techspec
+    /// CAPFL states: `Md`, `Ipac`, `Prf`, `Sd`); the testbed reports
+    /// `notionalPrincipal` and `nominalInterestRate` 0 after every event.
+    #[test]
+    fn capfl01_reports_no_underlying_state() {
+        let (terms, risk) = capfl01();
+        let events = CapflEngine
+            .evaluate(&terms, &risk)
+            .expect("capfl01 evaluates");
+        assert!(events.iter().all(|e| e.state.notional_principal.is_zero()
+            && e.state.nominal_interest_rate.is_zero()
+            && e.state.accrued_interest.is_zero()));
     }
 }
