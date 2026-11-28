@@ -1,6 +1,7 @@
-//! Testbed-driven tests: every terms object in the four vendored fixed-income
-//! testbeds must deserialize into `ContractTerms`, all cycle strings must
-//! parse, and every case must satisfy the generated applicability tables.
+//! Testbed-driven tests: every terms object in the nineteen vendored
+//! testbeds must deserialize into `ContractTerms` and all cycle strings
+//! must parse; every fixed-income case must satisfy the generated
+//! applicability tables.
 
 use actus_model::builders::{AnnBuilder, LamBuilder, NamBuilder, PamBuilder};
 use actus_model::cycle::Cycle;
@@ -40,7 +41,7 @@ fn testbed_files() -> Vec<std::path::PathBuf> {
         .filter(|p| p.extension().map(|e| e == "json").unwrap_or(false))
         .collect();
     files.sort();
-    assert_eq!(files.len(), 8, "eight vendored testbeds expected");
+    assert_eq!(files.len(), 19, "nineteen vendored testbeds expected");
     files
 }
 
@@ -66,8 +67,10 @@ fn every_testbed_terms_object_deserializes_into_contract_terms() {
         }
     }
     assert_eq!(
-        total_cases, 154,
-        "25 PAM + 31 LAM + 22 NAM + 31 ANN + 15 CLM + 4 CSH + 11 SWAPS + 15 CEC"
+        total_cases, 277,
+        "25 PAM + 31 LAM + 22 NAM + 31 ANN + 15 CLM + 4 CSH + 11 SWAPS + 15 CEC \
+         + 10 STK + 4 COM + 12 FXOUT + 14 SWPPV + 4 CAPFL + 23 OPTNS + 14 FUTUR \
+         + 14 CEG + 9 UMP + 18 LAX + 1 ad0 (ANN)"
     );
 }
 
@@ -122,14 +125,10 @@ fn cec_credit_enhancement_terms_deserialize() {
         .collect();
     assert_eq!(covered.len(), 2);
     assert_eq!(covering.len(), 1);
-    assert_eq!(
-        covered[0].object.as_ref().expect("object").contract_id,
-        Some("loan01".to_string())
-    );
+    assert_eq!(covered[0].contract_identifier(), Some("loan01"));
     assert_eq!(
         covering[0]
-            .object
-            .as_ref()
+            .embedded_contract()
             .expect("object")
             .market_object_code,
         Some("GOLD".to_string())

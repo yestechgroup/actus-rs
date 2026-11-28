@@ -233,31 +233,139 @@ pub struct ExpectedEvent {
     pub accrued_interest: Option<Decimal>,
 }
 
-/// Loads the testbed cases for `contract_type`, ordered by identifier.
+/// One vendored official testbed file (`vendor/actus/tests/actus-tests-<name>.json`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Testbed {
+    /// File stem after `actus-tests-`, e.g. `pam` or `ad0`.
+    pub name: &'static str,
+    /// The contract type every case of the file carries.
+    pub contract_type: ContractType,
+}
+
+impl Testbed {
+    /// The testbed file name, e.g. `actus-tests-pam.json`.
+    #[must_use]
+    pub fn file_name(&self) -> String {
+        format!("actus-tests-{}.json", self.name)
+    }
+
+    /// Loads the testbed's cases, ordered by identifier.
+    pub fn load(&self) -> Result<Vec<ActusTestCase>, Error> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../vendor/actus/tests")
+            .join(self.file_name());
+        let raw = fs::read_to_string(&path).map_err(Error::Io)?;
+        let cases: BTreeMap<String, ActusTestCase> =
+            serde_json::from_str(&raw).map_err(Error::Json)?;
+        let mut ordered: Vec<ActusTestCase> = cases.into_values().collect();
+        ordered.sort_by(|a, b| a.identifier.cmp(&b.identifier));
+        Ok(ordered)
+    }
+}
+
+/// Every vendored testbed, in report order: the eight original files, then
+/// the eleven vendored with the hand-tested types (`vendor/actus/README.md`).
+///
+/// `ad0` holds one ANN case (`ann-ad0`, an `AD` monitoring event) in its own
+/// upstream file; it is reported apart from the `ann` testbed.
+pub const TESTBEDS: &[Testbed] = &[
+    Testbed {
+        name: "pam",
+        contract_type: ContractType::Pam,
+    },
+    Testbed {
+        name: "lam",
+        contract_type: ContractType::Lam,
+    },
+    Testbed {
+        name: "nam",
+        contract_type: ContractType::Nam,
+    },
+    Testbed {
+        name: "ann",
+        contract_type: ContractType::Ann,
+    },
+    Testbed {
+        name: "csh",
+        contract_type: ContractType::Csh,
+    },
+    Testbed {
+        name: "clm",
+        contract_type: ContractType::Clm,
+    },
+    Testbed {
+        name: "swaps",
+        contract_type: ContractType::Swaps,
+    },
+    Testbed {
+        name: "cec",
+        contract_type: ContractType::Cec,
+    },
+    Testbed {
+        name: "stk",
+        contract_type: ContractType::Stk,
+    },
+    Testbed {
+        name: "com",
+        contract_type: ContractType::Com,
+    },
+    Testbed {
+        name: "fxout",
+        contract_type: ContractType::Fxout,
+    },
+    Testbed {
+        name: "swppv",
+        contract_type: ContractType::Swppv,
+    },
+    Testbed {
+        name: "capfl",
+        contract_type: ContractType::Capfl,
+    },
+    Testbed {
+        name: "optns",
+        contract_type: ContractType::Optns,
+    },
+    Testbed {
+        name: "futur",
+        contract_type: ContractType::Futur,
+    },
+    Testbed {
+        name: "ceg",
+        contract_type: ContractType::Ceg,
+    },
+    Testbed {
+        name: "ump",
+        contract_type: ContractType::Ump,
+    },
+    Testbed {
+        name: "lax",
+        contract_type: ContractType::Lax,
+    },
+    Testbed {
+        name: "ad0",
+        contract_type: ContractType::Ann,
+    },
+];
+
+/// The testbed named `name` (the file stem, e.g. `ad0`).
+#[must_use]
+pub fn testbed(name: &str) -> Option<Testbed> {
+    TESTBEDS.iter().copied().find(|t| t.name == name)
+}
+
+/// Loads the testbed cases for `contract_type`, ordered by identifier: the
+/// type's own file `actus-tests-<type>.json` (for ANN, the `ann` file;
+/// `ad0` loads through [`testbed`]).
 ///
 /// The testbed files live under `vendor/actus/tests` relative to the crate;
 /// the path is resolved via `CARGO_MANIFEST_DIR` so both `cargo test` and the
 /// `report` binary find them without runtime configuration.
 pub fn load_testbed(contract_type: ContractType) -> Result<Vec<ActusTestCase>, Error> {
-    let file_name = match contract_type {
-        ContractType::Pam => "actus-tests-pam.json",
-        ContractType::Lam => "actus-tests-lam.json",
-        ContractType::Nam => "actus-tests-nam.json",
-        ContractType::Ann => "actus-tests-ann.json",
-        ContractType::Csh => "actus-tests-csh.json",
-        ContractType::Clm => "actus-tests-clm.json",
-        ContractType::Swaps => "actus-tests-swaps.json",
-        ContractType::Cec => "actus-tests-cec.json",
-        other => return Err(Error::UnknownContractType(other)),
-    };
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../vendor/actus/tests")
-        .join(file_name);
-    let raw = fs::read_to_string(&path).map_err(Error::Io)?;
-    let cases: BTreeMap<String, ActusTestCase> = serde_json::from_str(&raw).map_err(Error::Json)?;
-    let mut ordered: Vec<ActusTestCase> = cases.into_values().collect();
-    ordered.sort_by(|a, b| a.identifier.cmp(&b.identifier));
-    Ok(ordered)
+    TESTBEDS
+        .iter()
+        .find(|t| t.contract_type == contract_type)
+        .ok_or(Error::UnknownContractType(contract_type))?
+        .load()
 }
 
 /// A [`RiskFactorProvider`] over a testbed `dataObserved` map.
@@ -480,6 +588,41 @@ mod tests {
         assert_eq!(risk.rate("USD_SWP", at), Some(d("0.0098271604945178")));
         assert_eq!(risk.rate("USD_SWP", after), Some(d("0.0098271604945178")));
         assert_eq!(risk.index("USD_SWP", at), Some(d("0.0098271604945178")));
+    }
+
+    #[test]
+    fn every_vendored_testbed_is_listed_and_loads() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendor/actus/tests");
+        let mut on_disk: Vec<String> = fs::read_dir(dir)
+            .expect("testbed dir")
+            .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".json"))
+            .collect();
+        on_disk.sort();
+        let mut listed: Vec<String> = TESTBEDS.iter().map(Testbed::file_name).collect();
+        listed.sort();
+        assert_eq!(listed, on_disk);
+        let mut total = 0;
+        for testbed in TESTBEDS {
+            let cases = testbed
+                .load()
+                .unwrap_or_else(|e| panic!("{}: {e}", testbed.name));
+            assert!(cases
+                .iter()
+                .all(|c| c.terms.contract_type == testbed.contract_type));
+            total += cases.len();
+        }
+        assert_eq!(total, 277);
+        assert_eq!(
+            testbed("ad0").map(|t| t.contract_type),
+            Some(ContractType::Ann)
+        );
+        assert!(testbed("nope").is_none());
+        assert_eq!(load_testbed(ContractType::Ann).expect("ann").len(), 31);
+        assert!(matches!(
+            load_testbed(ContractType::Bcs),
+            Err(Error::UnknownContractType(ContractType::Bcs))
+        ));
     }
 
     #[test]

@@ -48,4 +48,4 @@ pub use generated::attribute::{self, Attribute, AttributeType};
 pub use generated::contract_type::{self, ContractType};
 pub use generated::event_type::{self, EventType};
 pub use metadata::{ApplicabilityInfo, AttributeInfo, ContractTypeInfo};
-pub use terms::{ContractReference, ContractTerms};
+pub use terms::{ContractReference, ContractTerms, ReferenceObject};

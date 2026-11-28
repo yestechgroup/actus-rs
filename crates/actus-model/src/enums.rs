@@ -149,9 +149,13 @@ actus_enum! {
 
 actus_enum! {
     /// ACTUS attribute `CLDR` — Calendar. v1.4 defines only `NC` and `MF`
-    /// (there is no `NO` or `SCF` calendar token).
+    /// (there is no `NO` or `SCF` calendar token). The FXOUT testbed spells
+    /// `NC` as `NOCALENDAR`, the upper-cased dictionary identifier
+    /// `noCalendar`; that spelling also deserializes (a testbed encoding
+    /// quirk, `vendor/actus/README.md`) and the acronym is displayed.
     pub enum Calendar {
         /// `NC` — no calendar.
+        #[serde(alias = "NOCALENDAR")]
         Nc => "NC",
         /// `MF` — Monday to Friday.
         Mf => "MF",
@@ -461,6 +465,12 @@ mod tests {
     fn calendar_tokens() {
         assert_eq!(Calendar::from_str("NC").unwrap(), Calendar::Nc);
         assert_eq!(Calendar::from_str("MF").unwrap(), Calendar::Mf);
+        let fxout: Calendar = serde_json::from_value(serde_json::json!("NOCALENDAR")).unwrap();
+        assert_eq!(fxout, Calendar::Nc);
+        assert_eq!(
+            serde_json::to_value(fxout).unwrap(),
+            serde_json::json!("NC")
+        );
     }
 
     #[test]

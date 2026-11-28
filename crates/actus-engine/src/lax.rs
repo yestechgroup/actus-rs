@@ -755,7 +755,14 @@ impl Context {
             }
             Kind::ArrayRateReset => {
                 state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
-                match terms.array_fixed_variable {
+                // Phase-1 reading of the array: its first element applies to
+                // every segment, as the scalar did before #44 (per-segment
+                // selection follows with the LAX testbed).
+                match terms
+                    .array_fixed_variable
+                    .as_ref()
+                    .and_then(|v| v.first().copied())
+                {
                     Some(ArrayFixVar::Variable) => {
                         // The segment rate is the spread on top of the
                         // reference rate (the applicable `RRSP`).

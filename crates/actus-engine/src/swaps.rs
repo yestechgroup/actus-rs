@@ -135,12 +135,13 @@ fn evaluate_leg(
     role: ContractRole,
     risk: &dyn RiskFactorProvider,
 ) -> Result<Vec<ContractEvent>, EngineError> {
-    let mut leg_terms = reference
-        .object
-        .clone()
-        .ok_or(EngineError::InvalidTransition(
-            "contract reference without an embedded contract object".to_string(),
-        ))?;
+    let mut leg_terms =
+        reference
+            .embedded_contract()
+            .cloned()
+            .ok_or(EngineError::InvalidTransition(
+                "contract reference without an embedded contract object".to_string(),
+            ))?;
     leg_terms.contract_role = Some(role);
     leg_registry().evaluate(&leg_terms, risk)
 }

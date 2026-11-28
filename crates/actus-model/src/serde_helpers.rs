@@ -4,6 +4,17 @@
 //! minute or second precision and sometimes bare-day precision. These helper
 //! modules are wired in via `#[serde(deserialize_with = ...)]` on the
 //! `Option<T>` fields of [`crate::terms::ContractTerms`].
+//!
+//! # Singleton arrays
+//!
+//! The dictionary types the `array*` attributes as arrays (`Timestamp[]`,
+//! `Cycle[]`, `Real[]`, `Enum[]`), one element per schedule segment. The
+//! official LAX testbed writes a one-segment array as a bare scalar
+//! (`"arrayCycleOfPrincipalRedemption": "P1YL1"`,
+//! `"arrayNextPrincipalRedemptionPayment": 20`) in 14 of its 18 cases, and
+//! mixes both shapes in one bag (lax16). Every array helper here therefore
+//! reads a bare scalar as a one-element array and serializes the canonical
+//! array form (a testbed encoding quirk, `vendor/actus/README.md`).
 
 use chrono::{Datelike, NaiveDateTime, NaiveTime};
 use rust_decimal::Decimal;
@@ -308,7 +319,10 @@ pub mod timestamp_vec_option {
             type Value = Option<Vec<NaiveDateTime>>;
 
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                write!(f, "an array of ACTUS timestamps or null")
+                write!(
+                    f,
+                    "an array of ACTUS timestamps, a single timestamp, or null"
+                )
             }
 
             fn visit_seq<S>(self, mut seq: S) -> Result<Option<Vec<NaiveDateTime>>, S::Error>
@@ -323,6 +337,14 @@ pub mod timestamp_vec_option {
                     out.push(timestamp);
                 }
                 Ok(Some(out))
+            }
+
+            /// A bare timestamp is a one-element array (SINGLETON_ARRAYS).
+            fn visit_str<E: DeError>(self, v: &str) -> Result<Option<Vec<NaiveDateTime>>, E> {
+                let timestamp = parse_timestamp(v).map_err(|_| {
+                    DeError::invalid_value(Unexpected::Str(v), &"an ISO 8601 timestamp")
+                })?;
+                Ok(Some(vec![timestamp]))
             }
 
             fn visit_unit<E: DeError>(self) -> Result<Option<Vec<NaiveDateTime>>, E> {
@@ -367,7 +389,7 @@ pub mod decimal_vec_option {
             type Value = Option<Vec<Decimal>>;
 
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                write!(f, "an array of ACTUS decimals or null")
+                write!(f, "an array of ACTUS decimals, a single decimal, or null")
             }
 
             fn visit_seq<S>(self, mut seq: S) -> Result<Option<Vec<Decimal>>, S::Error>
@@ -395,6 +417,27 @@ pub mod decimal_vec_option {
                 Ok(Some(out))
             }
 
+            /// A bare decimal is a one-element array (SINGLETON_ARRAYS).
+            fn visit_str<E: DeError>(self, v: &str) -> Result<Option<Vec<Decimal>>, E> {
+                parse_decimal(v)
+                    .map(|d| Some(vec![d]))
+                    .map_err(|_| DeError::invalid_value(Unexpected::Str(v), &"a decimal value"))
+            }
+
+            fn visit_f64<E: DeError>(self, v: f64) -> Result<Option<Vec<Decimal>>, E> {
+                Decimal::try_from(v)
+                    .map(|d| Some(vec![d]))
+                    .map_err(DeError::custom)
+            }
+
+            fn visit_i64<E: DeError>(self, v: i64) -> Result<Option<Vec<Decimal>>, E> {
+                Ok(Some(vec![Decimal::from(v)]))
+            }
+
+            fn visit_u64<E: DeError>(self, v: u64) -> Result<Option<Vec<Decimal>>, E> {
+                Ok(Some(vec![Decimal::from(v)]))
+            }
+
             fn visit_unit<E: DeError>(self) -> Result<Option<Vec<Decimal>>, E> {
                 Ok(None)
             }
@@ -416,5 +459,55 @@ pub mod decimal_vec_option {
             Some(v) => serializer.collect_seq(v.iter().map(|d| d.to_string())),
             None => serializer.serialize_none(),
         }
+    }
+}
+
+/// Deserialize `Option<Vec<T>>` from a JSON array of `T`, a single bare `T`
+/// (a one-element array, see "Singleton arrays" above) or null. Used by the
+/// cycle- and enum-valued array attributes (`ARIPCL`, `ARPRCL`, `ARRRCL`,
+/// `ARINCDEC`, `ARFIXVAR`), whose elements deserialize from strings.
+pub mod one_or_many_option {
+    use serde::de::value::StrDeserializer;
+    use serde::de::{Deserialize, Deserializer, Error as DeError, SeqAccess, Visitor};
+    use std::fmt;
+    use std::marker::PhantomData;
+
+    /// Serde `deserialize_with` entry point of [`one_or_many_option`](self).
+    pub fn deserialize<'de, D, T>(deserializer: D) -> Result<Option<Vec<T>>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: Deserialize<'de>,
+    {
+        struct OneOrManyVisitor<T>(PhantomData<T>);
+
+        impl<'de, T: Deserialize<'de>> Visitor<'de> for OneOrManyVisitor<T> {
+            type Value = Option<Vec<T>>;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "an array, a single array element, or null")
+            }
+
+            fn visit_seq<S: SeqAccess<'de>>(self, mut seq: S) -> Result<Self::Value, S::Error> {
+                let mut out = Vec::new();
+                while let Some(item) = seq.next_element::<T>()? {
+                    out.push(item);
+                }
+                Ok(Some(out))
+            }
+
+            fn visit_str<E: DeError>(self, v: &str) -> Result<Self::Value, E> {
+                T::deserialize(StrDeserializer::<E>::new(v)).map(|item| Some(vec![item]))
+            }
+
+            fn visit_unit<E: DeError>(self) -> Result<Self::Value, E> {
+                Ok(None)
+            }
+
+            fn visit_none<E: DeError>(self) -> Result<Self::Value, E> {
+                Ok(None)
+            }
+        }
+
+        deserializer.deserialize_any(OneOrManyVisitor(PhantomData))
     }
 }

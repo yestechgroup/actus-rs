@@ -89,31 +89,51 @@ fn print_header(metadata: &ActusMetadata) {
     println!();
 }
 
+/// The testbeds a command-line filter selects: a testbed name (`ad0`,
+/// `lax`) or every testbed of a contract type (`ANN` selects `ann` and
+/// `ad0`).
+fn select(arg: &str) -> Option<Vec<cases::Testbed>> {
+    let arg = arg.trim();
+    if let Some(testbed) = cases::testbed(&arg.to_ascii_lowercase()) {
+        if testbed.name != testbed.contract_type.as_acronym().to_ascii_lowercase() {
+            return Some(vec![testbed]);
+        }
+    }
+    let contract_type = arg.to_ascii_uppercase().parse::<ContractType>().ok()?;
+    let selected: Vec<cases::Testbed> = cases::TESTBEDS
+        .iter()
+        .copied()
+        .filter(|t| t.contract_type == contract_type)
+        .collect();
+    (!selected.is_empty()).then_some(selected)
+}
+
+/// The report heading of a testbed: the contract type, plus the file name
+/// when it is not the type's own file (`ANN (ad0)`).
+fn heading(testbed: cases::Testbed) -> String {
+    let acronym = testbed.contract_type.as_acronym();
+    if testbed.name == acronym.to_ascii_lowercase() {
+        acronym.to_string()
+    } else {
+        format!("{acronym} ({})", testbed.name)
+    }
+}
+
 fn main() -> ExitCode {
     let filter = std::env::args().nth(1);
     let registry = engine_registry();
     let tol = comparator::Tolerance::default();
 
-    let mut types: Vec<ContractType> = Vec::new();
-    match filter {
-        Some(arg) => match arg.trim().to_ascii_uppercase().parse::<ContractType>() {
-            Ok(contract_type) => types.push(contract_type),
-            Err(_) => {
-                eprintln!("unknown contract type filter: {arg}");
+    let testbeds: Vec<cases::Testbed> = match filter {
+        Some(arg) => match select(&arg) {
+            Some(selected) => selected,
+            None => {
+                eprintln!("unknown contract type or testbed filter: {arg}");
                 return ExitCode::from(2);
             }
         },
-        None => {
-            types.push(ContractType::Pam);
-            types.push(ContractType::Lam);
-            types.push(ContractType::Nam);
-            types.push(ContractType::Ann);
-            types.push(ContractType::Csh);
-            types.push(ContractType::Clm);
-            types.push(ContractType::Swaps);
-            types.push(ContractType::Cec);
-        }
-    }
+        None => cases::TESTBEDS.to_vec(),
+    };
 
     let metadata = ActusMetadata::load().unwrap_or_default();
     print_header(&metadata);
@@ -124,15 +144,15 @@ fn main() -> ExitCode {
     let mut events_expected = 0;
     let mut all_passed = true;
 
-    for contract_type in types {
-        let loaded = match cases::load_testbed(contract_type) {
+    for testbed in testbeds {
+        let loaded = match testbed.load() {
             Ok(loaded) => loaded,
             Err(e) => {
-                eprintln!("{contract_type}: {e}");
+                eprintln!("{}: {e}", testbed.name);
                 return ExitCode::from(2);
             }
         };
-        println!("{contract_type}");
+        println!("{}", heading(testbed));
         let mut type_passed = 0;
         for case in &loaded {
             contracts_total += 1;
@@ -208,6 +228,19 @@ mod tests {
         assert_eq!(metadata.dictionary_version, "1.4");
         assert_eq!(metadata.dictionary_commit, "");
         assert_eq!(metadata.tests_commit, "");
+    }
+
+    #[test]
+    fn filters_select_types_and_named_testbeds() {
+        let names = |arg: &str| select(arg).map(|v| v.iter().map(|t| t.name).collect::<Vec<_>>());
+        assert_eq!(names("PAM"), Some(vec!["pam"]));
+        assert_eq!(names("ann"), Some(vec!["ann", "ad0"]));
+        assert_eq!(names("ad0"), Some(vec!["ad0"]));
+        assert_eq!(names("lax"), Some(vec!["lax"]));
+        assert_eq!(names("BCS"), None);
+        assert_eq!(names("nope"), None);
+        assert_eq!(heading(cases::testbed("ad0").unwrap()), "ANN (ad0)");
+        assert_eq!(heading(cases::testbed("swppv").unwrap()), "SWPPV");
     }
 
     #[test]

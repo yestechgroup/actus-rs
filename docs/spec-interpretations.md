@@ -181,3 +181,59 @@ did this (#27); CLM and UMP did not until this entry.
   state.
 - *Property.* Without the sign, an `RPL` contract does not mirror its `RPA`
   twin.
+
+---
+
+## SI-005: testbed-attested event types outside the v1.4 dictionary
+
+**Section.** Dictionary event vocabulary (`actus-dictionary-event.json`);
+LAX schedule and functions (techspec l. 1298, l. 1402, the `PI` rows);
+SWPPV schedule and functions (l. 2130, l. 2135, l. 2211, l. 2215, the
+`IP^(fix)` and `IP^(var)` rows).
+
+**Question.** `actus-model` generates `EventType` from the dictionary, and
+a test requires it to cover the dictionary exactly. Three event types that
+the techspec defines, and that the official testbeds expect, are not in the
+dictionary:
+
+| Token | Meaning | Techspec | Testbed |
+|-------|---------|----------|---------|
+| `PI` | LAX principal increase (`ARINCDEC = INC`) | l. 1298, l. 1402 | `actus-tests-lax.json`, 18 events (lax16–lax18) |
+| `IPFX` | SWPPV fixed-leg interest, `DS = 'D'` | `IP^(fix)`, l. 2130, l. 2211 | `actus-tests-swppv.json`, 45 events (10 cases) |
+| `IPFL` | SWPPV floating-leg interest, `DS = 'D'` | `IP^(var)`, l. 2135, l. 2215 | `actus-tests-swppv.json`, 45 events (10 cases) |
+
+**Readings.**
+
+1. Keep `EventType` to the dictionary; the testbeds that use these tokens
+   cannot even be loaded.
+2. Map each token to its nearest dictionary event (`PI` → `PD`, as SI-002
+   did; `IPFX`/`IPFL` → `IP`).
+3. Add the three tokens to `EventType`, kept apart from the dictionary
+   vocabulary.
+
+**Chosen.** Reading 3, through the generator rather than by hand:
+- `crates/actus-model/extensions/event-types.json` lists each extension
+  with its identifier, sequence, techspec lines and testbed files. It is
+  crate data, not vendored data.
+- The generator appends them to `EventType` with a "Testbed extension"
+  doc comment. `EventType::DICTIONARY` is exactly the dictionary,
+  `EventType::EXTENSIONS` exactly the extensions, and `ALL` both;
+  `is_dictionary()` tells them apart. The generator rejects an extension
+  that collides with a dictionary acronym or identifier.
+- `tests/dictionary.rs` checks that `EXTENSIONS` equals the set of event
+  types the vendored testbeds use minus the dictionary's. The vocabulary
+  widens only by testbed evidence, and a testbed bump that drops or adds
+  one fails the test.
+- Sequences: `PI` takes `PR`'s 3 (it is the `INC` counterpart of `PR` in
+  the LAX schedule; the testbed orders same-day `PI, IP`). `IPFX` and `IPFL`
+  take `IP`'s 8; the testbed orders same-day `IPFX, IPFL, RR`, so an
+  engine emits `IPFX` first and the stable sort keeps it there.
+
+`EventType` stays exhaustive (the maintainers chose not to add
+`#[non_exhaustive]` in this batch).
+
+**Evidence.** The techspec rows above, and the testbed counts. Reading 1
+makes 3 of 18 LAX cases and 10 of 14 SWPPV cases unloadable. Reading 2
+would report a principal *increase* as a drawing and merge legs the
+techspec keeps apart when `DS = 'D'`. Which engines emit the extensions is
+decided per type (SI-002 for LAX `PI`; SWPPV in its own entry).

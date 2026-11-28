@@ -52,8 +52,7 @@ pub(crate) fn maturity_date(
         .iter()
         .filter_map(|reference| {
             reference
-                .object
-                .as_ref()
+                .embedded_contract()
                 .and_then(|object| object.maturity_date)
         })
         .map(normalize_timestamp)
@@ -76,8 +75,7 @@ pub(crate) fn credit_event_trigger(
         .iter()
         .map(|reference| {
             reference
-                .object
-                .as_ref()
+                .embedded_contract()
                 .and_then(|object| object.contract_id.as_ref())
         })
         .collect();
@@ -119,12 +117,13 @@ fn covered_contract_value(
     basis: Option<GuaranteedExposure>,
     risk: &dyn RiskFactorProvider,
 ) -> Result<Decimal, EngineError> {
-    let child_terms = reference
-        .object
-        .clone()
-        .ok_or(EngineError::InvalidTransition(
-            "covered contract reference without an embedded contract object".to_string(),
-        ))?;
+    let child_terms =
+        reference
+            .embedded_contract()
+            .cloned()
+            .ok_or(EngineError::InvalidTransition(
+                "covered contract reference without an embedded contract object".to_string(),
+            ))?;
     if basis == Some(GuaranteedExposure::MarketValue) {
         let code = child_terms
             .market_object_code

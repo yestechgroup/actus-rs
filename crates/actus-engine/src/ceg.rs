@@ -168,7 +168,10 @@ fn covered_contracts(structure: &[ContractReference]) -> Vec<&ContractReference>
     }
     structure
         .iter()
-        .filter(|r| r.reference_type == Some(ContractReferenceType::Contract) && r.object.is_some())
+        .filter(|r| {
+            r.reference_type == Some(ContractReferenceType::Contract)
+                && r.embedded_contract().is_some()
+        })
         .collect()
 }
 

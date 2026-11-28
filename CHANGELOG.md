@@ -41,6 +41,17 @@ Everything since the crates were imported from `onboarding-os`.
 - `EngineError::Arithmetic` for decimal overflow and division by zero.
 - `docs/spec-interpretations.md` (SI-001 to SI-004).
 - The v1.0 roadmap (`ROADMAP.md`), plus `CONTRIBUTING.md` and `SECURITY.md`.
+- The 11 remaining official testbeds of the pinned `actus-tests` commit
+  (STK, COM, FXOUT, SWPPV, CAPFL, OPTNS, FUTUR, CEG, UMP, LAX and the ANN
+  case `ad0`; 123 cases), with every file's SHA-256 and git blob recorded
+  and checked in CI (`scripts/check-vendored-testbeds.sh`). The conformance
+  loader, the `report` binary and the behaviour snapshot cover all 19
+  testbeds, and each new testbed has a gate that pins its exact passing
+  cases.
+- `EventType` gains the testbed-attested extensions `PI`, `IPFX` and `IPFL`,
+  generated from `crates/actus-model/extensions/event-types.json`, with
+  `EventType::DICTIONARY`, `EventType::EXTENSIONS` and `is_dictionary()`
+  (SI-005).
 
 ### Changed
 
@@ -55,11 +66,21 @@ Everything since the crates were imported from `onboarding-os`.
   `pub fn`s in `actus_engine::common` (`initial_base_amount`,
   `apply_principal_redemption`) now return `Result`.
 - One contract role sign function, `common::contract_role_sign`, for every
-  engine (SI-003, #38). RUSTSEC-2026-0543 (chrono
+  engine (SI-003, #38).
+- `ContractReference::object` is an `Option<ReferenceObject>`: an embedded
+  contract, a contract identifier (`CID`) or a market object code (`MOC`),
+  chosen by `referenceType`. Use `embedded_contract()`,
+  `contract_identifier()` and `market_object_code()`.
+- `ContractTerms::array_fixed_variable` is an `Option<Vec<ArrayFixVar>>`,
+  as the dictionary's `Enum[]` type requires (#44). RUSTSEC-2026-0543 (chrono
   unmaintained) is ignored with a reason in `deny.toml`; see #32.
 
 ### Fixed
 
+- Terms the official testbeds use and the model rejected: the calendar
+  spelling `NOCALENDAR`, one-element array attributes written as bare
+  scalars, `arrayFixedVariable` arrays (#44), and `contractStructure`
+  references to a contract identifier or a market object.
 - `actus_engine::evaluate()` used an empty registry and always returned
   `UnsupportedContractType`.
 - Reachable panics on untrusted input in the engine, model and wasm crates

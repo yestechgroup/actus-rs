@@ -128,8 +128,8 @@ fn second_leg(structure: &[ContractReference]) -> Result<&ContractReference, Eng
 
 fn clone_reference_leg(reference: &ContractReference) -> Result<ContractTerms, EngineError> {
     reference
-        .object
-        .clone()
+        .embedded_contract()
+        .cloned()
         .ok_or(EngineError::InvalidTransition(
             "contract reference without an embedded contract object".to_string(),
         ))
