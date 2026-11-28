@@ -375,3 +375,71 @@ fn whitespace_padded_and_scientific_decimals_parse() {
     assert_eq!(parse_decimal("-350").unwrap(), Decimal::from(-350));
     assert!(parse_decimal("not-a-number").is_err());
 }
+
+/// Testbed spellings of dictionary attributes: the testbed key and the
+/// dictionary key it deserializes into (`vendor/actus/README.md`, known
+/// quirks).
+const TESTBED_ALIASES: &[(&str, &str)] = &[
+    (
+        "cycleAnchorDateOfDividendPayment",
+        "cycleAnchorDateOfDividend",
+    ),
+    ("cycleOfDividendPayment", "cycleOfDividend"),
+];
+
+/// Administrative identifiers the model does not carry: they name the
+/// parties and enter no payoff or state (the generator drops them from
+/// `base_required` for the same reason). `creatorId` is the CEC testbed's
+/// spelling of `creatorID`.
+const UNMODELLED_ADMIN_KEYS: &[&str] = &["creatorID", "counterpartyID", "creatorId"];
+
+/// Every key of every testbed terms object (and of every embedded contract
+/// in a `contractStructure`) is either carried by `ContractTerms`, a known
+/// testbed alias or an administrative identifier. The model ignores
+/// unknown keys, so without this check a misspelled or missing attribute
+/// is silently dropped (as `nominalInterestRate2` and the dividend
+/// attributes were).
+#[test]
+fn no_testbed_terms_key_is_silently_dropped() {
+    fn check(raw: &Value, back: &Value, at: &str, dropped: &mut Vec<String>) {
+        for (key, value) in raw.as_object().expect("terms object") {
+            if value.is_null() || UNMODELLED_ADMIN_KEYS.contains(&key.as_str()) {
+                continue;
+            }
+            let carried = match TESTBED_ALIASES.iter().find(|(alias, _)| alias == key) {
+                Some((_, canonical)) => back.get(*canonical).is_some(),
+                None => back.get(key).is_some(),
+            };
+            if !carried {
+                dropped.push(format!("{at}: {key}"));
+            }
+            if key == "contractStructure" {
+                for (i, reference) in value.as_array().expect("structure").iter().enumerate() {
+                    let object = &reference["object"];
+                    if object.get("contractType").is_some() {
+                        check(
+                            object,
+                            &back[key][i]["object"],
+                            &format!("{at}/{i}"),
+                            dropped,
+                        );
+                    }
+                }
+            }
+        }
+    }
+    let mut dropped = Vec::new();
+    for file in testbed_files() {
+        let doc = load(&file);
+        for (case_id, case) in doc.as_object().expect("testbed object") {
+            let terms: ContractTerms = serde_json::from_value(case["terms"].clone())
+                .unwrap_or_else(|e| panic!("{case_id}: {e}"));
+            let back = serde_json::to_value(&terms).expect("terms serialize");
+            check(&case["terms"], &back, case_id, &mut dropped);
+        }
+    }
+    assert!(
+        dropped.is_empty(),
+        "testbed keys the model drops: {dropped:#?}"
+    );
+}

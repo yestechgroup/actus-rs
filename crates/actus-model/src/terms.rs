@@ -21,8 +21,9 @@ use serde::{Deserialize, Serialize};
 
 /// ACTUS contract terms for the fixed-income family.
 ///
-/// Field docs map each attribute to its dictionary acronym; `fixingDays` is
-/// carried by the testbeds but missing from dictionary v1.4 (see the crate
+/// Field docs map each attribute to its dictionary acronym; `fixingDays` and
+/// `marketObjectCodeOfDividends` are carried by the testbeds but missing
+/// from dictionary v1.4 (see the crate
 /// documentation for the full gap list).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContractTerms {
@@ -517,17 +518,22 @@ pub struct ContractTerms {
         skip_serializing_if = "Option::is_none"
     )]
     pub cycle_of_fee: Option<Cycle>,
-    /// ACTUS attribute `DVANX` — Cycle Anchor Date Of Dividend.
+    /// ACTUS attribute `DVANX` — Cycle Anchor Date Of Dividend. The STK
+    /// testbed spells it `cycleAnchorDateOfDividendPayment`, which also
+    /// deserializes (`vendor/actus/README.md`, known quirks).
     #[serde(
         rename = "cycleAnchorDateOfDividend",
+        alias = "cycleAnchorDateOfDividendPayment",
         default,
         deserialize_with = "timestamp_option::deserialize",
         skip_serializing_if = "Option::is_none"
     )]
     pub cycle_anchor_date_of_dividend: Option<NaiveDateTime>,
-    /// ACTUS attribute `DVCL` — Cycle Of Dividend.
+    /// ACTUS attribute `DVCL` — Cycle Of Dividend. The STK testbed spells it
+    /// `cycleOfDividendPayment`, which also deserializes.
     #[serde(
         rename = "cycleOfDividend",
+        alias = "cycleOfDividendPayment",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -548,6 +554,17 @@ pub struct ContractTerms {
         skip_serializing_if = "Option::is_none"
     )]
     pub next_dividend_payment_amount: Option<Decimal>,
+    /// Market object code of the observed dividend series of a stock
+    /// (`marketObjectCodeOfDividends`). Carried by the STK testbed but absent
+    /// from dictionary v1.4, like `fixingDays`; the techspec `POF_DV_STK`
+    /// observes the series `concat(CID, "-DV")` instead (SI-006).
+    #[serde(
+        rename = "marketObjectCodeOfDividends",
+        default,
+        deserialize_with = "crate::serde_helpers::string_option::deserialize",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub market_object_code_of_dividends: Option<String>,
     /// ACTUS attribute `QT` — Quantity.
     #[serde(
         rename = "quantity",
@@ -1119,6 +1136,7 @@ impl ContractTerms {
             cycle_of_dividend: None,
             ex_dividend_date: None,
             next_dividend_payment_amount: None,
+            market_object_code_of_dividends: None,
             quantity: None,
             unit: None,
             market_value_observed: None,
@@ -1168,7 +1186,7 @@ impl ContractTerms {
     /// Builders use this against the generated applicability tables to enforce
     /// required and applicable sets.
     #[must_use]
-    pub fn presence(&self) -> [(&'static str, bool); 107] {
+    pub fn presence(&self) -> [(&'static str, bool); 108] {
         [
             ("contractType", true),
             ("contractID", self.contract_id.is_some()),
@@ -1355,6 +1373,10 @@ impl ContractTerms {
             (
                 "nextDividendPaymentAmount",
                 self.next_dividend_payment_amount.is_some(),
+            ),
+            (
+                "marketObjectCodeOfDividends",
+                self.market_object_code_of_dividends.is_some(),
             ),
             ("quantity", self.quantity.is_some()),
             ("unit", self.unit.is_some()),

@@ -100,6 +100,13 @@ in-Rust oracle only (`crates/actus-conformance/src/oracle.rs`, `tests/differenti
    interest). The techspec defines all three. `actus-model` adds them through
    its generator from `crates/actus-model/extensions/event-types.json`
    (`docs/spec-interpretations.md`, SI-005).
+9. The STK testbed spells the dividend schedule attributes
+   **`cycleAnchorDateOfDividendPayment`** and **`cycleOfDividendPayment`**
+   (dictionary: `cycleAnchorDateOfDividend`, `cycleOfDividend`), and names
+   the observed dividend series with **`marketObjectCodeOfDividends`**, which
+   the dictionary lacks. `actus-model` accepts both spellings and carries the
+   extra attribute, as it does `fixingDays`. A model test checks that no
+   testbed key is dropped silently.
 
 ## Purpose
 

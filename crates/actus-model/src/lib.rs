@@ -21,7 +21,8 @@
 //! `actus-dictionary-terms.json` (see [`source::normalize_quotes`]), the
 //! `ScalingEffect` zero/letter-`O` spelling split between dictionary and
 //! testbeds, the duplicated `SCMP` business day convention token, and
-//! `fixingDays` (in the testbeds, absent from dictionary v1.4).
+//! `fixingDays` and `marketObjectCodeOfDividends` (in the testbeds, absent
+//! from dictionary v1.4).
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
