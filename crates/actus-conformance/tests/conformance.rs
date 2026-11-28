@@ -382,7 +382,7 @@ fn swppv_testbed_gate() {
 
 #[test]
 fn capfl_testbed_gate() {
-    gate("capfl", 4, 16, &[]);
+    gate_complete("capfl", 4, 16);
 }
 
 #[test]
