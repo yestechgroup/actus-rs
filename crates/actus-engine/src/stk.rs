@@ -46,12 +46,12 @@ use rust_decimal::Decimal;
 use actus_model::{ContractTerms, ContractType, EndOfMonthConvention, EventType};
 
 use crate::common::role_sign;
+use crate::common::rolls_before;
 use crate::daycount::normalize_timestamp;
 use crate::engine::ContractEngine;
 use crate::event::{sequence_rank, ContractEvent};
 use crate::num::ck;
 use crate::risk::RiskFactorProvider;
-use crate::schedule::cycle_step;
 use crate::state::{ContractState, ContractStatus};
 use crate::EngineError;
 
@@ -237,23 +237,10 @@ fn dividend_slots(
             let eomc = terms
                 .end_of_month_convention
                 .unwrap_or(EndOfMonthConvention::Sd);
-            let mut rolls = vec![anchor];
-            if let Some(termination) = termination {
-                let mut index: u64 = 0;
-                loop {
-                    // Bounded by the 20_000 check below, so never saturates.
-                    index = index.saturating_add(1);
-                    let next = cycle_step(anchor, index, cycle, eomc)?;
-                    if next >= termination {
-                        break;
-                    }
-                    rolls.push(next);
-                    if index > 20_000 {
-                        break;
-                    }
-                }
+            match termination {
+                Some(termination) => rolls_before(anchor, cycle, eomc, termination)?,
+                None => vec![anchor],
             }
-            rolls
         }
         None => vec![anchor],
     };
@@ -332,6 +319,30 @@ mod tests {
             "terminationDate": "2016-04-15T00:00:00",
             "currency": "USD"
         })
+    }
+
+    /// A daily dividend schedule over 64 years (more than 20,000 rolls)
+    /// pays every dividend up to the termination: the roll limit is the
+    /// engine-wide `MAX_SCHEDULE_ROLLS` with an error past it, not a silent
+    /// cut at 20,000 rolls.
+    #[test]
+    fn long_dividend_schedules_are_not_truncated() {
+        let mut raw = base_terms();
+        raw["cycleAnchorDateOfDividend"] = json!("2016-02-15T00:00:00");
+        raw["cycleOfDividend"] = json!("P1DL1");
+        raw["terminationDate"] = json!("2080-01-01T00:00:00");
+        let events = StkEngine
+            .evaluate(&terms(raw), &StateProvider::new())
+            .expect("events");
+        let dividends: Vec<&ContractEvent> = events
+            .iter()
+            .filter(|e| e.event_type == EventType::DividendPayment)
+            .collect();
+        assert!(dividends.len() > 20_002, "{} dividends", dividends.len());
+        assert_eq!(
+            dividends.last().expect("dividends").time,
+            t("2079-12-31T00:00:00")
+        );
     }
 
     /// Buy 100 shares at 50 (payoff -5000, position notional +5000), two

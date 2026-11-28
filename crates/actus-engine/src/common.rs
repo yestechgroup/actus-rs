@@ -310,3 +310,35 @@ pub(crate) fn redemption_count(notional: Decimal, prnxt: Decimal) -> Option<u64>
     }
     (ck(notional) / prnxt).get().ok()?.ceil().to_u64()
 }
+
+/// The anchor followed by every cycle roll strictly before `end`, without
+/// stub correction and without business day shifting (the CLM, UMP and STK
+/// series idiom).
+///
+/// # Errors
+/// [`EngineError::InvalidSchedule`] past [`MAX_SCHEDULE_ROLLS`] elements,
+/// like [`generate_schedule`], instead of silently cutting the series short.
+pub(crate) fn rolls_before(
+    anchor: NaiveDateTime,
+    cycle: &Cycle,
+    eomc: EndOfMonthConvention,
+    end: NaiveDateTime,
+) -> Result<Vec<NaiveDateTime>, EngineError> {
+    let mut rolls = vec![anchor];
+    let mut index: u64 = 0;
+    loop {
+        // Bounded by the MAX_SCHEDULE_ROLLS check below, so never saturates.
+        index = index.saturating_add(1);
+        let next = cycle_step(anchor, index, cycle, eomc)?;
+        if next >= end {
+            return Ok(rolls);
+        }
+        rolls.push(next);
+        if index > MAX_SCHEDULE_ROLLS {
+            return Err(EngineError::InvalidSchedule(format!(
+                "cycle {cycle} from {anchor} to {end} needs more than \
+                 {MAX_SCHEDULE_ROLLS} schedule elements"
+            )));
+        }
+    }
+}

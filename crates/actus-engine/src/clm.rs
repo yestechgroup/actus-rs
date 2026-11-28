@@ -47,6 +47,7 @@ use actus_model::{
     DayCountConvention, EndOfMonthConvention, EventType,
 };
 
+use crate::common::rolls_before;
 use crate::common::{calculate_first, role_sign, stub_series};
 use crate::daycount::{day_count_fraction, normalize_timestamp};
 use crate::engine::ContractEngine;
@@ -418,22 +419,7 @@ impl Context {
         anchor: NaiveDateTime,
         cycle: &Cycle,
     ) -> Result<Vec<NaiveDateTime>, EngineError> {
-        let end = self.rolling_end();
-        let mut rolls = vec![anchor];
-        let mut index: u64 = 0;
-        loop {
-            // Bounded by the 20_000 check below, so never saturates.
-            index = index.saturating_add(1);
-            let next = cycle_step(anchor, index, cycle, self.eomc)?;
-            if next >= end {
-                break;
-            }
-            rolls.push(next);
-            if index > 20_000 {
-                break;
-            }
-        }
-        Ok(rolls)
+        rolls_before(anchor, cycle, self.eomc, self.rolling_end())
     }
 
     /// Resolves the (calculation, emission) pair of one roll date: `CS*`
@@ -642,6 +628,33 @@ mod tests {
             (actual - expected).abs() <= tolerance(),
             "expected {expected}, actual {actual}"
         );
+    }
+
+    /// A daily capitalization schedule over 60 years (more than 20,000
+    /// rolls) runs to the maturity instead of stopping silently after 20,000
+    /// rolls.
+    #[test]
+    fn long_capitalization_schedules_are_not_truncated() {
+        let terms = terms(json!({
+            "contractType": "CLM",
+            "contractRole": "RPA",
+            "statusDate": "2015-08-20T00:00:00",
+            "initialExchangeDate": "2015-08-22T00:00:00",
+            "maturityDate": "2075-08-22T00:00:00",
+            "notionalPrincipal": "1000",
+            "nominalInterestRate": "0.0001",
+            "cycleOfInterestPayment": "P1DL1",
+            "dayCountConvention": "A365",
+            "currency": "CHF"
+        }));
+        let events = ClmEngine
+            .evaluate(&terms, &StateProvider::new())
+            .expect("events");
+        let last_ipci = events
+            .iter()
+            .rfind(|e| e.event_type == EventType::InterestCapitalization)
+            .expect("capitalizations");
+        assert_eq!(last_ipci.time, t("2075-08-21T00:00:00"));
     }
 
     /// The clm02 fixture: interest capitalizes at every ten-day cycle point

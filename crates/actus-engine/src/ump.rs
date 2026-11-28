@@ -46,12 +46,12 @@ use actus_model::{
 };
 
 use crate::common::role_sign;
+use crate::common::rolls_before;
 use crate::daycount::{day_count_fraction, normalize_timestamp};
 use crate::engine::ContractEngine;
 use crate::event::{sequence_rank, ContractEvent};
 use crate::num::ck;
 use crate::risk::RiskFactorProvider;
-use crate::schedule::cycle_step;
 use crate::state::{ContractState, ContractStatus};
 use crate::EngineError;
 
@@ -332,22 +332,7 @@ fn roll_series(
     let Some(termination) = termination else {
         return Ok(vec![anchor]);
     };
-    let eomc = EndOfMonthConvention::Sd;
-    let mut rolls = vec![anchor];
-    let mut index: u64 = 0;
-    loop {
-        // Bounded by the 20_000 check below, so never saturates.
-        index = index.saturating_add(1);
-        let next = cycle_step(anchor, index, cycle, eomc)?;
-        if next >= termination {
-            break;
-        }
-        rolls.push(next);
-        if index > 20_000 {
-            break;
-        }
-    }
-    Ok(rolls)
+    rolls_before(anchor, cycle, EndOfMonthConvention::Sd, termination)
 }
 
 #[cfg(test)]
@@ -386,6 +371,25 @@ mod tests {
             "dayCountConvention": "A365",
             "currency": "CHF"
         })
+    }
+
+    /// A daily interest schedule over 60 years (more than 20,000 rolls) runs
+    /// to the termination instead of stopping silently after 20,000 rolls.
+    #[test]
+    fn long_interest_schedules_are_not_truncated() {
+        let mut raw = base_terms();
+        raw["cycleAnchorDateOfInterestPayment"] = json!("2016-01-15T00:00:00");
+        raw["cycleOfInterestPayment"] = json!("P1DL1");
+        raw["terminationDate"] = json!("2076-01-15T00:00:00");
+        raw["priceAtTerminationDate"] = json!("1000");
+        let events = UmpEngine
+            .evaluate(&terms(raw), &StateProvider::new())
+            .expect("events");
+        let last_ip = events
+            .iter()
+            .rfind(|e| e.event_type == EventType::InterestPayment)
+            .expect("interest payments");
+        assert_eq!(last_ip.time, t("2076-01-14T00:00:00"));
     }
 
     /// A carried `accruedInterest` (`IPAC`) is an unsigned attribute; the
