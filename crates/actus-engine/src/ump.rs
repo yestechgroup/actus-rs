@@ -25,9 +25,10 @@
 //! - An observed `PI` pays `ISC x (IPAC + Y x IPNR x NT)` (the PAM `IP` row)
 //!   and resets `IPAC`, so interest leaves as cash instead of capitalizing.
 //! - Scheduled interest (`IPANX`/`IPCL`) and rate resets (`RRANX`/`RRCL`
-//!   observing `MOCRR` with multiplier and spread, PAM `RR` row) are honored
-//!   only up to the termination date: the contract has no maturity, so the
-//!   series would be unbounded and are not generated without `TD`.
+//!   observing `MOCRR` with multiplier and spread, PAM `RR` row) run to
+//!   `min(TD, Md)`, exclusive, where `Md` is the last observed principal
+//!   redemption or else the analysis horizon `tmax` (techspec UMP states).
+//!   With no end at all the schedule is open-ended and an error.
 //! - Termination: when `terminationDate` is set, a terminal `TD` event pays
 //!   `sgn x (PTD + IPAC + Y x IPNR x NT)` (the PAM `TD` row), zeroes the
 //!   notional states and reports [`ContractStatus::Terminated`]. Without
@@ -125,6 +126,7 @@ impl ContractEngine for UmpEngine {
             ied,
             t0,
             termination,
+            horizon: risk.analysis_horizon().map(normalize_timestamp),
         };
 
         let mut slots: Vec<Slot> = Vec::new();
@@ -190,22 +192,37 @@ struct Context {
     ied: NaiveDateTime,
     t0: NaiveDateTime,
     termination: Option<NaiveDateTime>,
+    /// The analysis horizon `tmax` of the environment.
+    horizon: Option<NaiveDateTime>,
 }
 
 impl Context {
-    /// The scheduled `IP` and `RR` series (techspec PAM schedule rows IP and
-    /// RR): unrolled from `IPANX`/`RRANX ?? IED` by `IPCL`/`RRCL` while the
-    /// rolled date stays strictly before the termination date, observing
-    /// `MOCRR` at the roll date. The series exist only when `TD` bounds them
-    /// (the contract has no maturity, so they would be unbounded otherwise);
-    /// a schedule point shared with an observed event of the same type is
-    /// dropped in favor of the observed one.
+    /// The scheduled `IP` and `RR` series (techspec UMP schedule rows IPCI
+    /// and RR): unrolled from `IPANX`/`RRANX ?? IED` by `IPCL`/`RRCL` while
+    /// the rolled date stays strictly before the end of the schedule,
+    /// `min(TD, Md)`, observing `MOCRR` at the roll date. `Md` is the last
+    /// observed principal redemption, or else the analysis horizon `tmax`
+    /// (techspec UMP states); the horizon is exclusive (ump04 ends its
+    /// yearly series in 2017 for a horizon of 2018-01-01). A cycle with no
+    /// end is open-ended and an error. A schedule point shared with an
+    /// observed event of the same type is dropped in favor of the observed
+    /// one.
     fn scheduled_slots(
         &self,
         terms: &ContractTerms,
         slots: &mut Vec<Slot>,
         observed: &[(NaiveDateTime, EventType)],
     ) -> Result<(), EngineError> {
+        let maturity = observed
+            .iter()
+            .filter(|(_, event_type)| *event_type == EventType::PrincipalRedemption)
+            .map(|(time, _)| *time)
+            .max()
+            .or(self.horizon);
+        let end = match (self.termination, maturity) {
+            (Some(td), Some(md)) => Some(td.min(md)),
+            (td, md) => td.or(md),
+        };
         let series = [
             (
                 terms.cycle_of_interest_payment.as_ref(),
@@ -230,11 +247,15 @@ impl Context {
             let Some(cycle) = cycle else {
                 continue;
             };
-            let Some(termination) = self.termination else {
-                continue;
+            let Some(end) = end else {
+                return Err(EngineError::InvalidSchedule(
+                    "the UMP schedule S(s, IPCL, Md) is open-ended: set terminationDate \
+                     or an analysis horizon"
+                        .to_string(),
+                ));
             };
-            for time in roll_series(anchor, cycle, Some(termination))? {
-                if time <= self.ied || time <= self.t0 || time >= termination {
+            for time in roll_series(anchor, cycle, Some(end))? {
+                if time <= self.ied || time <= self.t0 || time >= end {
                     continue;
                 }
                 if observed.contains(&(time, event_type)) {
@@ -625,6 +646,54 @@ mod tests {
         assert!(matches!(
             UmpEngine.evaluate(&terms(raw), &StateProvider::new()),
             Err(EngineError::MissingAttribute("dayCountConvention"))
+        ));
+    }
+
+    /// The UMP testbed's ump04 shape (`RPL`, yearly interest from 2014).
+    fn ump04(extra: serde_json::Value) -> ContractTerms {
+        let mut raw = json!({
+            "contractType": "UMP",
+            "contractID": "ump04",
+            "statusDate": "2012-12-15T00:00:00",
+            "contractRole": "RPL",
+            "currency": "USD",
+            "initialExchangeDate": "2013-01-01T00:00:00",
+            "notionalPrincipal": "  1000",
+            "cycleAnchorDateOfInterestPayment": "2014-01-01T00:00:00",
+            "cycleOfInterestPayment": "P1YL1",
+            "nominalInterestRate": "0.01",
+            "dayCountConvention": "30E360",
+            "xDayNotice": "P1M"
+        });
+        for (key, value) in extra.as_object().expect("object") {
+            raw[key] = value.clone();
+        }
+        serde_json::from_value(raw).expect("terms")
+    }
+
+    /// ump04: without observed `PR` events, `Md = tmax` (techspec UMP
+    /// states), so the scheduled interest runs to the analysis horizon,
+    /// exclusive: 2014-2017 for a horizon of 2018-01-01.
+    #[test]
+    fn ump04_scheduled_interest_runs_to_the_analysis_horizon() {
+        let risk = StateProvider::new().with_analysis_horizon(t("2018-01-01T00:00:00"));
+        let events = UmpEngine
+            .evaluate(&ump04(json!({})), &risk)
+            .expect("ump04 evaluates");
+        let times: Vec<NaiveDateTime> = events.iter().skip(1).map(|e| e.time).collect();
+        assert_eq!(
+            times,
+            vec![
+                t("2014-01-01T00:00:00"),
+                t("2015-01-01T00:00:00"),
+                t("2016-01-01T00:00:00"),
+                t("2017-01-01T00:00:00"),
+            ]
+        );
+        // Neither a termination nor a horizon: the schedule is open-ended.
+        assert!(matches!(
+            UmpEngine.evaluate(&ump04(json!({})), &StateProvider::new()),
+            Err(EngineError::InvalidSchedule(_))
         ));
     }
 }
