@@ -2,12 +2,13 @@
 name = "actus-engine"
 version = "0.1.0"
 edition = "2021"
+rust-version.workspace = true
 license.workspace = true
 repository = "https://github.com/yestechgroup/actus-rs"
 description = "ACTUS algorithmic engine: schedule generation, state transitions, payoff functions"
 
 [dependencies]
-actus-model = { path = "../actus-model" }
+actus-model = { workspace = true }
 chrono = { workspace = true }
 rust_decimal = { workspace = true }
 thiserror = { workspace = true }

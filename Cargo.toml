@@ -13,8 +13,16 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/yestechgroup/actus-rs"
+# Minimum supported Rust version. CI builds and tests exactly this toolchain
+# (the `msrv` job). It is set by the locked dependency tree, not by our own
+# code: `home` (via microsoft-webui in actus-web) requires 1.88.
+rust-version = "1.88"
 
 [workspace.dependencies]
+# Internal crates: a version next to the path so the crates stay publishable.
+actus-model = { version = "0.1.0", path = "crates/actus-model" }
+actus-engine = { version = "0.1.0", path = "crates/actus-engine" }
+actus-wasm = { version = "0.1.0", path = "crates/actus-wasm" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }

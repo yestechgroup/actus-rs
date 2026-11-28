@@ -2,6 +2,7 @@
 name = "actus-wasm"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "WebAssembly bindings exposing ACTUS metadata, validation and evaluation to browser clients"
@@ -15,8 +16,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 rust_decimal = { workspace = true }
-actus-model = { path = "../actus-model" }
-actus-engine = { path = "../actus-engine" }
+actus-model = { workspace = true }
+actus-engine = { workspace = true }
 
 # Runs tests/wasm_runtime.rs under Node via wasm-bindgen-test-runner
 # (`cargo test -p actus-wasm --target wasm32-unknown-unknown`).
