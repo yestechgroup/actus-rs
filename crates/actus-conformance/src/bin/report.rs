@@ -217,7 +217,7 @@ fn main() -> ExitCode {
                 .collect();
             println!(
                 "  {:<6} {:<5} {}",
-                row.contract_type,
+                row.contract_type.to_string(),
                 row.tier.to_string(),
                 testbeds.join(", ")
             );
