@@ -19,7 +19,11 @@
    "currency": "USD"
   },
   "scenario": {
-   "rates": {},
+   "rates": {
+    "stk01-DV": {
+     "2016-02-15T00:00:00": "2.5"
+    }
+   },
    "fxRates": {},
    "unitPrices": {},
    "observedEvents": [],
@@ -46,7 +50,11 @@
    "currency": "USD"
   },
   "scenario": {
-   "rates": {},
+   "rates": {
+    "stk01-DV": {
+     "2016-02-15T00:00:00": "2.5"
+    }
+   },
    "fxRates": {},
    "unitPrices": {},
    "observedEvents": [],
@@ -74,7 +82,11 @@
    "marketObjectCode": "ACME"
   },
   "scenario": {
-   "rates": {},
+   "rates": {
+    "stk01-DV": {
+     "2016-02-15T00:00:00": "2.5"
+    }
+   },
    "fxRates": {},
    "unitPrices": {
     "ACME": {
@@ -103,11 +115,16 @@
    "currency": "USD"
   },
   "scenario": {
-   "rates": {},
+   "rates": {
+    "stk01-DV": {
+     "2016-02-15T00:00:00": "2.5"
+    }
+   },
    "fxRates": {},
    "unitPrices": {},
    "observedEvents": [],
-   "creditEvents": []
+   "creditEvents": [],
+   "analysisHorizon": "2018-01-01T00:00:00"
   }
  }
 ]

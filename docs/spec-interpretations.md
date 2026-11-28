@@ -237,3 +237,62 @@ makes 3 of 18 LAX cases and 10 of 14 SWPPV cases unloadable. Reading 2
 would report a principal *increase* as a drawing and merge legs the
 techspec keeps apart when `DS = 'D'`. Which engines emit the extensions is
 decided per type (SI-002 for LAX `PI`; SWPPV in its own entry).
+
+---
+
+## SI-006: STK and COM follow the techspec; the testbeds settle price, quantity and dividends
+
+**Section.** "STK: Stock" and "COM: Commodity" (techspec l. 1955–2030):
+schedules, states and functions. Dictionary attributes `quantity` (QT),
+`nextDividendPaymentAmount` (DVNP), `cycleOfDividend` (DVCL).
+
+**Question.** The engines were written from the paper (`vendor/actus/docs/paper.md`
+§7.9–7.10) with a share-count model: a position notional `sgn · QT · PPRD`,
+a required `quantity` and purchase, and `DVNP` paid on every dividend
+date. The techspec and the newly vendored STK and COM testbeds disagree
+with that in five places.
+
+**Readings and evidence.**
+
+| Point | Paper-derived engine | Techspec | Testbed | Chosen |
+|-------|----------------------|----------|---------|--------|
+| Notional state | `sgn · QT · PPRD` | no `Nt` (states: `Prf`, `Sd`) | `notionalPrincipal` 0 everywhere | none |
+| `quantity` | required | absent from every payoff | STK: never set, payoffs `= PPRD`; COM: `PRD = 2 × 700` | `QT` multiplies, default 1 (dictionary default) |
+| Purchase | required | `PRD` "Same as PAM", only when set | com02, stk08–10 have none | optional |
+| Dividend series | `DVANX`, `DVCL` to `TD`, or the anchor alone | `S(s, DVCL, tmax)` | stk06–08 run quarterly to the horizon `to` | to `tmax`, the analysis horizon (or `TD`) |
+| Dividend amount | `DVNP` every period | `DV^(fix)` pays `DVNP` at `DVANX`; `DV` pays `O(concat(CID, "-DV"), t)` | observed series named by `marketObjectCodeOfDividends` | observed; code from `marketObjectCodeOfDividends`, else `CID-DV` |
+
+Details of the choices:
+
+- **Quantity.** The techspec's COM payoffs reuse `POF_PRD_STK = R · (−1) ·
+  PPRD`, without `QT`, yet the COM testbed multiplies by it (com01:
+  `QT = 2`, `PPRD = 700`, `PRD` pays 1400; com02: `TD` pays `2 × 900`).
+  "`QT` multiplies, with the dictionary default 1" fits both testbeds; the
+  STK cases, which never set `quantity`, pay the price itself. `QT` also
+  multiplies the dividends (per-share dividends of a position), which no
+  testbed can decide, since none sets both.
+- **Horizon.** `tmax` is the analysis horizon, carried by the evaluation
+  environment (`RiskFactorProvider::analysis_horizon`; the testbed `to`;
+  the wasm scenario's `analysisHorizon`). The series includes `tmax` when
+  it falls on the cycle (stk06 pays on its horizon 2018-01-01) and ends
+  before `TD`. A dividend cycle with neither bound is open-ended and an
+  error, where the engine used to pay the anchor alone, a silently wrong
+  answer.
+- **Dividend series code.** *Flip experiment:* observing the techspec's
+  `concat(CID, "-DV")` instead of `marketObjectCodeOfDividends` fails
+  stk06–stk10 (STK drops from 10/10 to 5/10). The testbed names the series
+  through `marketObjectCodeOfDividends`, an attribute the dictionary lacks
+  (carried like `fixingDays`; known quirk 9). `CID-DV` stays the fallback.
+- **`DVNP`.** The dictionary describes `DVNP` as "used as dividend payment
+  for each future dividend payment date" when `DVCL` is set. The techspec
+  pays it once, as `DV^(fix)` at `DVANX`, and starts the observed series
+  at `DVANX + DVCL`. No testbed case sets `DVNP`. The techspec ranks above
+  the dictionary (`CONTRIBUTING.md`), so the engine follows it.
+- **Business days.** Dividend dates follow `BDC`/`CLDR` (stk09: 2017-01-01
+  is a Sunday, and `SCF` pays on 2017-01-02).
+- **Not changed.** `IED` (paper-only for STK and COM; the techspec schedule
+  has none, and no testbed sets it) and the sale price precedence
+  (market observation, then `PTD`, then `MVO`; com02's `PTD` wins over its
+  `MVO`) stay as they were.
+
+**Result.** STK 10/10, COM 4/4.

@@ -18,12 +18,15 @@
 //!   `initialExchangeDate` is set, at the exchange date if both coincide.
 //!   When `IED` and `PRD` differ, `IED` emits as a zero-payoff agreement
 //!   event and the price settles at `PRD`.
-//! - Dividends (`DV`): the `DVANX`/`DVCL` schedule (paper: "Dividend events
-//!   based on `DVANX`, `DVCL`") pays `sgn x QT x DVNP` per period, reading
-//!   `nextDividendPaymentAmount` as the fixed per-period amount multiplied
-//!   by the share count. The series unrolls from the anchor while strictly
-//!   before the termination date; without `DVCL` only the anchor pays.
-//!   `DVNP` missing pays zero (the schedule point is still reported).
+//! - Dividends (`DV`, techspec STK schedule and functions; SI-006): with
+//!   `DVNP` set, a fixed `DV^(fix)` at `DVANX` pays `sgn x QT x DVNP`; the
+//!   series `S(s, DVCL, tmax)` (`s = DVANX`, or `DVANX + DVCL` after a fixed
+//!   one) pays the observed dividend `sgn x QT x O(code, t)`, where `code`
+//!   is `marketObjectCodeOfDividends` (the STK testbed) or else the
+//!   techspec's `concat(CID, "-DV")`. `tmax` is the analysis horizon of the
+//!   environment (inclusive); a termination ends the series before `TD`.
+//!   A cycle with neither is open-ended and an error. Dates follow
+//!   `BDC`/`CLDR`.
 //! - Sale: the terminal `TD` at `terminationDate` sells the position at
 //!   `sgn x QT x PTD` and reports
 //!   [`ContractStatus::Terminated`]. The per-unit sale price resolves as
@@ -33,9 +36,9 @@
 //!   falling back to its `index` view), then `priceAtTerminationDate`, then
 //!   `marketValueObserved`; with none present the evaluation reports
 //!   [`EngineError::MissingAttribute`].
-//! - Without a termination date the stream ends after the last dividend
-//!   with status [`ContractStatus::Active`] (an open position has no
-//!   terminal event). The ex-dividend date `DVEX` (no-accrual window) is
+//! - Without a termination date the stream ends with the last dividend
+//!   up to the horizon, with status [`ContractStatus::Active`] (an open
+//!   position has no terminal event). The ex-dividend date `DVEX` (no-accrual window) is
 //!   out of scope: dividends are attributed to their schedule dates.
 //! - Events at or before the status date `t0` are not observed (the CLM
 //!   analysis-window idiom).
@@ -43,15 +46,19 @@
 use chrono::NaiveDateTime;
 use rust_decimal::Decimal;
 
-use actus_model::{ContractTerms, ContractType, EndOfMonthConvention, EventType};
+use actus_model::{
+    BusinessDayConvention, Calendar, ContractTerms, ContractType, EndOfMonthConvention, EventType,
+};
+use chrono::Duration;
 
-use crate::common::role_sign;
 use crate::common::rolls_before;
+use crate::common::{calculation_time, role_sign};
 use crate::daycount::normalize_timestamp;
 use crate::engine::ContractEngine;
 use crate::event::{sequence_rank, ContractEvent};
 use crate::num::ck;
 use crate::risk::RiskFactorProvider;
+use crate::schedule::shift_business_day;
 use crate::state::{ContractState, ContractStatus};
 use crate::EngineError;
 
@@ -140,6 +147,7 @@ pub(crate) fn evaluate_position(
     if dividends == Dividends::Paid {
         dividend_slots(
             terms,
+            risk,
             quantity,
             sgn,
             entry_time,
@@ -215,12 +223,27 @@ struct Slot {
     payoff: Decimal,
 }
 
-/// Builds the `DV` dividend slots (paper section 7.9, "DV Schedule"):
-/// unrolls from `DVANX` by `DVCL` while strictly before the termination
-/// date; without a cycle the anchor pays once. Dividends at or before the
-/// entry or at or before the status date are not observed.
+/// Builds the `DV` dividend slots (techspec STK schedule and functions):
+///
+/// - `DV^(fix)`: when `DVNP` is set, one dividend at `DVANX` paying
+///   `R(CNTRL) x QT x DVNP`;
+/// - `DV`: the series `S(s, DVCL, tmax)` with `s = DVANX` (or
+///   `DVANX + DVCL` after a `DV^(fix)`), each paying the observed dividend
+///   `R(CNTRL) x QT x O(code, t)`. The code is `marketObjectCodeOfDividends`
+///   (the STK testbed) or else the techspec's `concat(CID, "-DV")`.
+///
+/// `tmax` is the analysis horizon of the environment, inclusive (stk06
+/// pays on its horizon 2018-01-01). A termination ends the series too,
+/// exclusively: a dividend at or after `TD` belongs to the buyer. A cycle
+/// with neither bound is an open-ended schedule and an error. Without a
+/// cycle only `DVANX` pays. Dates follow `BDC`/`CLDR`, observed at the
+/// calculation time of the convention (stk09: `SCF` pays 2017-01-01 on
+/// Monday 2017-01-02). Dividends at or before the entry (when there is one)
+/// or at or before the status date are not observed.
+#[allow(clippy::too_many_arguments)]
 fn dividend_slots(
     terms: &ContractTerms,
+    risk: &dyn RiskFactorProvider,
     quantity: Decimal,
     sgn: Decimal,
     entry: Option<NaiveDateTime>,
@@ -231,31 +254,81 @@ fn dividend_slots(
     let Some(anchor) = terms.cycle_anchor_date_of_dividend.map(normalize_timestamp) else {
         return Ok(());
     };
-    let amount = terms.next_dividend_payment_amount.unwrap_or(Decimal::ZERO);
-    let payoff = (ck(sgn) * quantity * amount).get()?;
-    let rolls = match terms.cycle_of_dividend.as_ref() {
-        Some(cycle) => {
-            let eomc = terms
-                .end_of_month_convention
-                .unwrap_or(EndOfMonthConvention::Sd);
-            match termination {
-                Some(termination) => rolls_before(anchor, cycle, eomc, termination)?,
-                None => vec![anchor],
-            }
-        }
-        None => vec![anchor],
+    let horizon = risk.analysis_horizon().map(normalize_timestamp);
+    let bdc = terms
+        .business_day_convention
+        .unwrap_or(BusinessDayConvention::Nos);
+    let cal = terms.calendar.unwrap_or(Calendar::Nc);
+    let in_window = |time: NaiveDateTime| {
+        time > t0
+            && entry.is_none_or(|entry| time > entry)
+            && termination.is_none_or(|td| time < td)
+            && horizon.is_none_or(|tmax| time <= tmax)
     };
-    for time in rolls {
-        if entry.is_some_and(|entry| time <= entry) || time <= t0 {
+    // Unshifted schedule dates of the observed series.
+    let mut series = vec![anchor];
+    if let Some(fixed) = terms.next_dividend_payment_amount {
+        if in_window(anchor) {
+            slots.push(Slot {
+                kind: Kind::Dividend,
+                time: shift_business_day(anchor, bdc, cal),
+                payoff: (ck(sgn) * quantity * fixed).get()?,
+            });
+        }
+        series.clear();
+    }
+    if let Some(cycle) = terms.cycle_of_dividend.as_ref() {
+        let eomc = terms
+            .end_of_month_convention
+            .unwrap_or(EndOfMonthConvention::Sd);
+        let end = match (termination, horizon) {
+            (Some(td), Some(tmax)) => td.min(
+                tmax.checked_add_signed(Duration::seconds(1))
+                    .unwrap_or(tmax),
+            ),
+            (Some(td), None) => td,
+            (None, Some(tmax)) => tmax
+                .checked_add_signed(Duration::seconds(1))
+                .unwrap_or(tmax),
+            (None, None) => {
+                return Err(EngineError::InvalidSchedule(
+                    "the STK dividend schedule S(DVANX, DVCL, tmax) is open-ended: \
+                     set terminationDate or an analysis horizon"
+                        .to_string(),
+                ))
+            }
+        };
+        series = rolls_before(anchor, cycle, eomc, end)?;
+        if terms.next_dividend_payment_amount.is_some() {
+            // `s = DVANX + DVCL`: the anchor paid the fixed amount.
+            series.retain(|time| *time != anchor);
+        }
+    }
+    for unshifted in series {
+        if !in_window(unshifted) {
             continue;
         }
-        if termination.is_some_and(|td| time >= td) {
-            continue;
-        }
+        let code = match terms.market_object_code_of_dividends.as_deref() {
+            Some(code) => code.to_string(),
+            None => terms
+                .contract_id
+                .as_deref()
+                .map(|id| format!("{id}-DV"))
+                .ok_or(EngineError::MissingAttribute("marketObjectCodeOfDividends"))?,
+        };
+        let time = shift_business_day(unshifted, bdc, cal);
+        let at = calculation_time(bdc, unshifted, time);
+        let observed = risk
+            .rate(&code, at)
+            .or_else(|| risk.index(&code, at))
+            .ok_or_else(|| EngineError::RiskFactorMissing {
+                code: code.clone(),
+                at: at.to_string(),
+            })?;
         slots.push(Slot {
             kind: Kind::Dividend,
             time,
-            payoff,
+            payoff: (ck(sgn) * quantity * observed).get()?,
         });
     }
     Ok(())
@@ -317,9 +390,17 @@ mod tests {
             "cycleAnchorDateOfDividend": "2016-02-15T00:00:00",
             "cycleOfDividend": "P1ML1",
             "nextDividendPaymentAmount": "2.5",
+            "marketObjectCodeOfDividends": "ACME_DV",
             "terminationDate": "2016-04-15T00:00:00",
             "currency": "USD"
         })
+    }
+
+    /// The observed per-share dividend 2.5 of `base_terms` from its anchor
+    /// on: the techspec pays `DVNP` at `DVANX` (`DV^(fix)`) and observes
+    /// every later dividend.
+    fn dividends() -> StateProvider {
+        StateProvider::new().with_rate("ACME_DV", t("2016-02-15T00:00:00"), dec!(2.5))
     }
 
     /// A daily dividend schedule over 64 years (more than 20,000 rolls)
@@ -333,7 +414,7 @@ mod tests {
         raw["cycleOfDividend"] = json!("P1DL1");
         raw["terminationDate"] = json!("2080-01-01T00:00:00");
         let events = StkEngine
-            .evaluate(&terms(raw), &StateProvider::new())
+            .evaluate(&terms(raw), &dividends())
             .expect("events");
         let dividends: Vec<&ContractEvent> = events
             .iter()
@@ -347,12 +428,13 @@ mod tests {
     }
 
     /// Buy 100 shares at 50 (payoff -5000; no notional state), two
-    /// dividends of quantity x 2.5 = 250 on the DVANX/DVCL schedule, sale at
-    /// TD at 55 (payoff +5500): the brief golden.
+    /// dividends of quantity x 2.5 = 250 on the DVANX/DVCL schedule (the
+    /// fixed `DVNP` at the anchor, then the observed 2.5), sale at TD at 55
+    /// (payoff +5500): the brief golden.
     #[test]
     fn buy_dividends_sell_matches_the_golden() {
         let events = StkEngine
-            .evaluate(&terms(base_terms()), &StateProvider::new())
+            .evaluate(&terms(base_terms()), &dividends())
             .expect("events");
         let types: Vec<(EventType, NaiveDateTime)> =
             events.iter().map(|e| (e.event_type, e.time)).collect();
@@ -382,7 +464,7 @@ mod tests {
     fn market_observation_overrides_the_terms_price_at_sale() {
         let mut raw = base_terms();
         raw["marketObjectCode"] = json!("ACME");
-        let provider = StateProvider::new().with_rate("ACME", t("2016-04-15T00:00:00"), dec!(54.5));
+        let provider = dividends().with_rate("ACME", t("2016-04-15T00:00:00"), dec!(54.5));
         let events = StkEngine.evaluate(&terms(raw), &provider).expect("events");
         let td = events.last().expect("TD");
         assert_eq!(td.event_type, EventType::Termination);
@@ -415,7 +497,7 @@ mod tests {
         let mut raw = base_terms();
         raw["contractRole"] = json!("RPL");
         let events = StkEngine
-            .evaluate(&terms(raw), &StateProvider::new())
+            .evaluate(&terms(raw), &dividends())
             .expect("events");
         assert_eq!(events[0].payoff, dec!(5000));
         assert_eq!(events[0].state.notional_principal, Decimal::ZERO);
@@ -453,22 +535,65 @@ mod tests {
         assert_eq!(events[1].payoff, dec!(-5000));
     }
 
-    /// An open position without a termination date has no terminal event.
+    /// An open position without a termination date has no terminal event,
+    /// and its dividend schedule `S(DVANX, DVCL, tmax)` needs the analysis
+    /// horizon `tmax`: without one the schedule is open-ended and an error.
     #[test]
     fn open_position_without_termination_stays_active() {
         let mut raw = base_terms();
         raw.as_object_mut().unwrap().remove("terminationDate");
+        assert!(matches!(
+            StkEngine.evaluate(&terms(raw.clone()), &dividends()),
+            Err(EngineError::InvalidSchedule(_))
+        ));
         let events = StkEngine
-            .evaluate(&terms(raw), &StateProvider::new())
+            .evaluate(
+                &terms(raw),
+                &dividends().with_analysis_horizon(t("2016-05-15T00:00:00")),
+            )
             .expect("events");
+        let dividend_times: Vec<NaiveDateTime> = events
+            .iter()
+            .filter(|e| e.event_type == EventType::DividendPayment)
+            .map(|e| e.time)
+            .collect();
         assert_eq!(
-            events.last().expect("last").event_type,
-            EventType::DividendPayment
+            dividend_times,
+            vec![
+                t("2016-02-15T00:00:00"),
+                t("2016-03-15T00:00:00"),
+                t("2016-04-15T00:00:00"),
+                t("2016-05-15T00:00:00"),
+            ]
         );
         assert_eq!(
             events.last().expect("last").state.contract_status,
             ContractStatus::Active
         );
+    }
+
+    /// Without a dividend market object code or a contract identifier there
+    /// is no series to observe; a missing observation is reported.
+    #[test]
+    fn observed_dividends_need_a_series() {
+        let mut raw = base_terms();
+        raw.as_object_mut()
+            .unwrap()
+            .remove("marketObjectCodeOfDividends");
+        assert!(matches!(
+            StkEngine.evaluate(&terms(raw.clone()), &dividends()),
+            Err(EngineError::MissingAttribute("marketObjectCodeOfDividends"))
+        ));
+        raw["contractID"] = json!("acme");
+        let provider = StateProvider::new().with_rate("acme-DV", t("2016-02-15T00:00:00"), dec!(1));
+        let events = StkEngine
+            .evaluate(&terms(raw.clone()), &provider)
+            .expect("CID-DV series");
+        assert_eq!(events[2].payoff, dec!(100));
+        assert!(matches!(
+            StkEngine.evaluate(&terms(raw), &StateProvider::new()),
+            Err(EngineError::RiskFactorMissing { .. })
+        ));
     }
 
     /// stk01: a stock without `quantity` takes the dictionary default
@@ -495,6 +620,98 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_type, EventType::Purchase);
         assert_eq!(events[0].payoff, dec!(-1100));
+    }
+
+    /// The dividend terms of the STK testbed's stk06 (quarterly from
+    /// 2013-04-01, no termination) and stk09 (yearly from 2013-01-01,
+    /// `SCF` on the Monday-to-Friday calendar).
+    fn observed_dividend_terms(case: &str) -> serde_json::Value {
+        let mut raw = json!({
+            "contractType": "STK",
+            "contractID": case,
+            "contractRole": "RPA",
+            "contractDealDate": "2012-12-28T00:00:00",
+            "statusDate": "2012-12-30T00:00:00",
+            "notionalPrincipal": "1000",
+            "currency": "USD",
+            "endOfMonthConvention": "EOM",
+            "marketObjectCodeOfDividends": format!("{}_DV", case.to_uppercase())
+        });
+        if case == "stk06" {
+            raw["purchaseDate"] = json!("2013-01-01T00:00:00");
+            raw["priceAtPurchaseDate"] = json!("1200");
+            raw["cycleAnchorDateOfDividendPayment"] = json!("2013-04-01T00:00:00");
+            raw["cycleOfDividendPayment"] = json!("P3ML1");
+        } else {
+            raw["calendar"] = json!("MF");
+            raw["businessDayConvention"] = json!("SCF");
+            raw["cycleAnchorDateOfDividendPayment"] = json!("2013-01-01T00:00:00");
+            raw["cycleOfDividendPayment"] = json!("P1YL1");
+        }
+        raw
+    }
+
+    /// stk06: the `DV` schedule is `S(DVANX, DVCL, tmax)` (techspec STK
+    /// schedule), so an open position pays quarterly up to the analysis
+    /// horizon, each `DV` paying the observed dividend
+    /// `R(CNTRL) x O(marketObjectCodeOfDividends, t)`.
+    #[test]
+    fn stk06_dividends_run_to_the_analysis_horizon() {
+        let mut provider = StateProvider::new().with_analysis_horizon(t("2018-01-01T00:00:00"));
+        for year in 2013..=2018 {
+            for month in [1, 4, 7, 10] {
+                let at = t(&format!("{year}-{month:02}-01T00:00:00"));
+                provider = provider.with_rate("STK06_DV", at, dec!(25));
+            }
+        }
+        let events = StkEngine
+            .evaluate(&terms(observed_dividend_terms("stk06")), &provider)
+            .expect("stk06 evaluates");
+        assert_eq!(events.len(), 21, "PRD and 20 quarterly dividends");
+        assert_eq!(events[0].event_type, EventType::Purchase);
+        assert_eq!(events[1].time, t("2013-04-01T00:00:00"));
+        assert_eq!(events[20].time, t("2018-01-01T00:00:00"));
+        assert!(events[1..]
+            .iter()
+            .all(|e| e.event_type == EventType::DividendPayment && e.payoff == dec!(25)));
+    }
+
+    /// stk09: dividend dates follow the business day convention (2017-01-01
+    /// is a Sunday; `SCF` pays on Monday 2017-01-02), and stk10's varying
+    /// observations are paid as observed.
+    #[test]
+    fn stk09_dividends_shift_to_business_days() {
+        let mut provider = StateProvider::new().with_analysis_horizon(t("2018-06-01T00:00:00"));
+        for (year, value) in [
+            (2013, 10),
+            (2014, 15),
+            (2015, 5),
+            (2016, 20),
+            (2017, 10),
+            (2018, 0),
+        ] {
+            provider = provider.with_rate(
+                "STK09_DV",
+                t(&format!("{year}-01-01T00:00:00")),
+                value.into(),
+            );
+        }
+        let events = StkEngine
+            .evaluate(&terms(observed_dividend_terms("stk09")), &provider)
+            .expect("stk09 evaluates");
+        let got: Vec<(NaiveDateTime, Decimal)> =
+            events.iter().map(|e| (e.time, e.payoff)).collect();
+        assert_eq!(
+            got,
+            vec![
+                (t("2013-01-01T00:00:00"), dec!(10)),
+                (t("2014-01-01T00:00:00"), dec!(15)),
+                (t("2015-01-01T00:00:00"), dec!(5)),
+                (t("2016-01-01T00:00:00"), dec!(20)),
+                (t("2017-01-02T00:00:00"), dec!(10)),
+                (t("2018-01-01T00:00:00"), dec!(0)),
+            ]
+        );
     }
 
     /// Missing required attributes are reported.
