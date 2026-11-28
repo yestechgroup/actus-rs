@@ -145,8 +145,10 @@ impl ContractEngine for FxoutEngine {
         }
         slots.sort_by_key(|slot| (slot.time, slot.kind.priority()));
 
+        // FXOUT carries no notional state: the techspec states are `Md`,
+        // `Prf` and `Sd`, and the official testbed reports
+        // `notionalPrincipal` 0 after every event.
         let mut state = ContractState::initial(terms);
-        state.notional_principal = (ck(sgn) * notional).get()?;
         let mut events = Vec::new();
         for slot in slots {
             let payoff = match slot.kind {
@@ -163,7 +165,6 @@ impl ContractEngine for FxoutEngine {
                     let price = terms
                         .price_at_termination_date
                         .ok_or(EngineError::MissingAttribute("priceAtTerminationDate"))?;
-                    state.notional_principal = Decimal::ZERO;
                     state.fee_accrued = Decimal::ZERO;
                     state.contract_status = ContractStatus::Terminated;
                     (ck(sgn) * price).get()?
@@ -171,7 +172,6 @@ impl ContractEngine for FxoutEngine {
                 Kind::Maturity => {
                     let rate = settlement_rate(terms, risk, maturity)?;
                     let payoff = (ck(sgn) * (ck(notional) - ck(rate) * notional2)).get()?;
-                    state.notional_principal = Decimal::ZERO;
                     state.fee_accrued = Decimal::ZERO;
                     state.contract_status = ContractStatus::Matured;
                     payoff
@@ -277,7 +277,7 @@ mod tests {
             ]
         );
         assert_eq!(events[0].payoff, Decimal::ZERO);
-        assert_eq!(events[0].state.notional_principal, dec!(1000000));
+        assert_eq!(events[0].state.notional_principal, Decimal::ZERO);
         assert_close(events[1].payoff, dec!(6400));
         assert_eq!(events[1].state.notional_principal, Decimal::ZERO);
         assert_eq!(events[1].state.contract_status, ContractStatus::Matured);
@@ -291,7 +291,7 @@ mod tests {
         raw["contractRole"] = json!("RPL");
         let risk = StateProvider::new().with_rate("USD/EUR", t("2016-01-10T00:00:00"), dec!(1.08));
         let events = FxoutEngine.evaluate(&terms(raw), &risk).expect("events");
-        assert_eq!(events[0].state.notional_principal, dec!(-1000000));
+        assert_eq!(events[0].state.notional_principal, Decimal::ZERO);
         assert_close(events[1].payoff, dec!(-6400));
     }
 
@@ -374,5 +374,43 @@ mod tests {
             FxoutEngine.evaluate(&terms(raw), &StateProvider::new()),
             Err(EngineError::MissingAttribute("maturityDate"))
         ));
+    }
+
+    /// fxout08: FXOUT has no notional state (techspec FXOUT states: `Md`,
+    /// `Prf`, `Sd`); the testbed reports `notionalPrincipal` 0 after the
+    /// purchase and the termination.
+    #[test]
+    fn fxout08_has_no_notional_state() {
+        let events = FxoutEngine
+            .evaluate(
+                &terms(json!({
+                    "contractType": "FXOUT",
+                    "contractID": "fxout08",
+                    "contractRole": "RPA",
+                    "currency": "USD",
+                    "currency2": "EUR",
+                    "maturityDate": "2014-12-31T23:59:59",
+                    "notionalPrincipal": "2000",
+                    "notionalPrincipal2": "1000",
+                    "statusDate": "2013-12-30T00:00:00",
+                    "purchaseDate": "2014-04-01T00:00:00",
+                    "priceAtPurchaseDate": "50",
+                    "terminationDate": "2014-09-30T23:59:59",
+                    "priceAtTerminationDate": "100"
+                })),
+                &StateProvider::new(),
+            )
+            .expect("fxout08 evaluates");
+        let got: Vec<(EventType, Decimal, Decimal)> = events
+            .iter()
+            .map(|e| (e.event_type, e.payoff, e.state.notional_principal))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (EventType::Purchase, dec!(-50), Decimal::ZERO),
+                (EventType::Termination, dec!(100), Decimal::ZERO),
+            ]
+        );
     }
 }

@@ -354,7 +354,7 @@ fn com_testbed_gate() {
 
 #[test]
 fn fxout_testbed_gate() {
-    gate("fxout", 12, 20, &["fxout06"]);
+    gate("fxout", 12, 20, &["fxout06", "fxout08"]);
 }
 
 #[test]

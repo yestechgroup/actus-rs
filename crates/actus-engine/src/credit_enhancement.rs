@@ -294,7 +294,11 @@ mod tests {
             ("P1ML1", "2015-02-10T00:00:00"),
             ("P0D", "2015-01-10T00:00:00"),
         ] {
-            assert_eq!(add_period(at, raw, &terms).expect(raw), t(expected), "{raw}");
+            assert_eq!(
+                add_period(at, raw, &terms).expect(raw),
+                t(expected),
+                "{raw}"
+            );
         }
         for bad in ["5D", "PD", "P5X", "P5DL", "P5DLX", "P5DL0X"] {
             assert!(add_period(at, bad, &terms).is_err(), "{bad}");
