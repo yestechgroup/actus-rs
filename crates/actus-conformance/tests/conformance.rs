@@ -392,7 +392,7 @@ fn optns_testbed_gate() {
 
 #[test]
 fn futur_testbed_gate() {
-    gate("futur", 14, 50, &[]);
+    gate_complete("futur", 14, 50);
 }
 
 #[test]
