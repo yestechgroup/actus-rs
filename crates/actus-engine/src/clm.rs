@@ -460,7 +460,8 @@ impl Context {
         let mut state = ContractState::initial(terms);
         state.notional_principal = (ck(self.sgn) * notional).get()?;
         state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
-        state.accrued_interest = terms.accrued_interest.unwrap_or(Decimal::ZERO);
+        state.accrued_interest =
+            (ck(self.sgn) * terms.accrued_interest.unwrap_or(Decimal::ZERO)).get()?;
         Ok(state)
     }
 
@@ -482,7 +483,8 @@ impl Context {
                 state.notional_principal =
                     (ck(self.sgn) * terms.notional_principal.unwrap_or(accrual)).get()?;
                 state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
-                state.accrued_interest = terms.accrued_interest.unwrap_or(Decimal::ZERO);
+                state.accrued_interest =
+                    (ck(self.sgn) * terms.accrued_interest.unwrap_or(Decimal::ZERO)).get()?;
                 let premium = terms.premium_discount_at_ied.unwrap_or(Decimal::ZERO);
                 (ck(self.sgn) * -(ck(terms.notional_principal.unwrap_or_default()) + premium))
                     .get()?
@@ -786,6 +788,48 @@ mod tests {
         assert_eq!(events[1].payoff, Decimal::ZERO);
         assert_eq!(events[1].state.notional_principal, dec!(1000));
         assert_close(events[2].payoff, dec!(9.53424657534247));
+    }
+
+    /// A carried `accruedInterest` (`IPAC`) is role-signed like the notional,
+    /// both for a fresh contract (the `IED` transition, actus-core
+    /// `STF_IED_PAM` keeping the `roleSign x IPAC` initial state of
+    /// `CallMoney`) and for a progressed one (the `t0` states): the same
+    /// rule as PAM/LAM/NAM (#27). `RPL` then mirrors `RPA` exactly.
+    #[test]
+    fn carried_accrued_interest_is_role_signed() {
+        for status_date in ["2015-08-20T00:00:00", "2015-08-25T00:00:00"] {
+            let raw = json!({
+                "contractType": "CLM",
+                "contractRole": "RPA",
+                "statusDate": status_date,
+                "initialExchangeDate": "2015-08-22T00:00:00",
+                "maturityDate": "2015-09-20T00:00:00",
+                "notionalPrincipal": "1000",
+                "nominalInterestRate": "0.12",
+                "accruedInterest": "10",
+                "cycleOfInterestPayment": "P1ML1",
+                "dayCountConvention": "AA",
+                "currency": "CHF"
+            });
+            let mut mirrored = raw.clone();
+            mirrored["contractRole"] = json!("RPL");
+            let lender = ClmEngine
+                .evaluate(&terms(raw), &StateProvider::new())
+                .expect("RPA");
+            let borrower = ClmEngine
+                .evaluate(&terms(mirrored), &StateProvider::new())
+                .expect("RPL");
+            assert_eq!(lender.len(), borrower.len(), "{status_date}");
+            assert!(lender
+                .iter()
+                .any(|e| e.event_type == EventType::InterestPayment));
+            for (a, b) in lender.iter().zip(&borrower) {
+                assert_eq!(a.event_type, b.event_type);
+                assert_eq!(b.payoff, -a.payoff, "{status_date} {:?}", a.event_type);
+                assert_eq!(b.state.notional_principal, -a.state.notional_principal);
+                assert_eq!(b.state.accrued_interest, -a.state.accrued_interest);
+            }
+        }
     }
 
     /// The clm10 fixture: under `SCP` with the Monday-to-Friday calendar the

@@ -185,7 +185,9 @@ impl ContractEngine for UmpEngine {
         let mut state = ContractState::initial(terms);
         state.notional_principal = (ck(sgn) * notional).get()?;
         state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
-        state.accrued_interest = terms.accrued_interest.unwrap_or(Decimal::ZERO);
+        // IPAC is unsigned; the state is role-signed like the notional.
+        state.accrued_interest =
+            (ck(sgn) * terms.accrued_interest.unwrap_or(Decimal::ZERO)).get()?;
         let mut events = Vec::new();
         for slot in slots {
             let payoff = ctx.apply(&mut state, slot, terms, risk)?;
@@ -282,7 +284,8 @@ impl Context {
                     .ok_or(EngineError::MissingAttribute("notionalPrincipal"))?;
                 state.notional_principal = (ck(self.sgn) * notional).get()?;
                 state.nominal_interest_rate = terms.nominal_interest_rate.unwrap_or(Decimal::ZERO);
-                state.accrued_interest = terms.accrued_interest.unwrap_or(Decimal::ZERO);
+                state.accrued_interest =
+                    (ck(self.sgn) * terms.accrued_interest.unwrap_or(Decimal::ZERO)).get()?;
                 (-ck(self.sgn) * notional).get()?
             }
             Kind::PrincipalRedemption => {
@@ -403,6 +406,40 @@ mod tests {
             "dayCountConvention": "A365",
             "currency": "CHF"
         })
+    }
+
+    /// A carried `accruedInterest` (`IPAC`) is an unsigned attribute; the
+    /// state is role-signed like the notional (actus-core
+    /// `UndefinedMaturityProfile` initial states: `roleSign x IPAC`, kept by
+    /// `STF_IED_PAM`; the same rule as PAM/LAM/NAM, #27). The `RPL` mirror
+    /// then negates every payoff and signed state of the `RPA` contract.
+
+    #[test]
+    fn carried_accrued_interest_is_role_signed() {
+        let mut raw = base_terms();
+        raw["accruedInterest"] = json!("10");
+        raw["terminationDate"] = json!("2016-09-15T00:00:00");
+        raw["priceAtTerminationDate"] = json!("1000");
+        let risk = StateProvider::new()
+            .with_observed_event(observed("2016-06-15T00:00:00", EventType::InterestPayment));
+        let lender = UmpEngine.evaluate(&terms(raw.clone()), &risk).expect("RPA");
+        raw["contractRole"] = json!("RPL");
+        let borrower = UmpEngine.evaluate(&terms(raw), &risk).expect("RPL");
+
+        assert_eq!(lender[0].event_type, EventType::InitialExchange);
+        assert_eq!(lender[0].state.accrued_interest, dec!(10));
+        assert_eq!(borrower[0].state.accrued_interest, dec!(-10));
+        assert_eq!(lender.len(), borrower.len());
+        for (a, b) in lender.iter().zip(&borrower) {
+            assert_eq!(a.event_type, b.event_type);
+            assert_eq!(b.state.notional_principal, -a.state.notional_principal);
+            assert_eq!(b.state.accrued_interest, -a.state.accrued_interest);
+            if a.event_type != EventType::Termination {
+                // TD pays `sgn x (PTD + Ipac)` with a signed Ipac (techspec
+                // PAM TD row), which is not a pure mirror.
+                assert_eq!(b.payoff, -a.payoff, "{:?}", a.event_type);
+            }
+        }
     }
 
     fn observed(time: &str, event_type: EventType) -> ObservedEvent {
