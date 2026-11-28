@@ -11,12 +11,13 @@
 //!   coinciding; differing `IED`/`PRD` split into a zero-payoff exchange
 //!   event and a purchase event carrying the price.
 //! - Sale: the terminal `TD` at `terminationDate` sells at
-//!   `sgn x QT x PTD` per unit, zeroing the notional state and reporting
+//!   `sgn x QT x PTD` per unit, reporting
 //!   [`ContractStatus::Terminated`]. The per-unit sale price resolves as
 //!   the market observation of `marketObjectCode` at `TD` (per-unit price
 //!   convention, `rate` view then `index` view of the provider), then the
 //!   terms `priceAtTerminationDate`, then `marketValueObserved`.
-//! - The notional state is the position notional `sgn x QT x PPRD`; the
+//! - There is no notional state (techspec COM states: `Sd` only; the
+//!   official testbed reports `notionalPrincipal` 0); the
 //!   `unit` attribute (`UT`, e.g. barrels) is descriptive and carries no
 //!   arithmetic role.
 //! - Without a termination date the stream ends after the entry with status
@@ -91,7 +92,7 @@ mod tests {
     }
 
     /// The symmetric buy/sell golden: buy 100 units at 50 (payoff -5000,
-    /// position notional +5000), sell at 52 (payoff +5200).
+    /// no notional state), sell at 52 (payoff +5200).
     #[test]
     fn buy_and_sell_match_the_golden() {
         let events = ComEngine
@@ -107,7 +108,7 @@ mod tests {
             ]
         );
         assert_eq!(events[0].payoff, dec!(-5000));
-        assert_eq!(events[0].state.notional_principal, dec!(5000));
+        assert_eq!(events[0].state.notional_principal, Decimal::ZERO);
         assert_eq!(events[1].payoff, dec!(5200));
         assert_eq!(events[1].state.notional_principal, Decimal::ZERO);
         assert_eq!(events[1].state.contract_status, ContractStatus::Terminated);
@@ -142,7 +143,7 @@ mod tests {
         assert_close(events.last().expect("TD").payoff, dec!(5150));
     }
 
-    /// `RPL` (short position) mirrors the payoffs and the notional state.
+    /// `RPL` (short position) mirrors the payoffs.
     #[test]
     fn rpl_mirrors_the_payoff_orientation() {
         let mut raw = base_terms();
@@ -151,7 +152,7 @@ mod tests {
             .evaluate(&terms(raw), &StateProvider::new())
             .expect("events");
         assert_eq!(events[0].payoff, dec!(5000));
-        assert_eq!(events[0].state.notional_principal, dec!(-5000));
+        assert_eq!(events[0].state.notional_principal, Decimal::ZERO);
         assert_eq!(events[1].payoff, dec!(-5200));
         assert_eq!(events[1].state.notional_principal, Decimal::ZERO);
     }
@@ -168,7 +169,7 @@ mod tests {
         assert_eq!(events[0].event_type, EventType::InitialExchange);
         assert_eq!(events[0].time, t("2016-01-10T00:00:00"));
         assert_eq!(events[0].payoff, Decimal::ZERO);
-        assert_eq!(events[0].state.notional_principal, dec!(5000));
+        assert_eq!(events[0].state.notional_principal, Decimal::ZERO);
         assert_eq!(events[1].event_type, EventType::Purchase);
         assert_eq!(events[1].payoff, dec!(-5000));
     }
@@ -198,5 +199,33 @@ mod tests {
             ComEngine.evaluate(&terms(raw), &StateProvider::new()),
             Err(EngineError::MissingAttribute("priceAtPurchaseDate"))
         ));
+    }
+
+    /// com01: COM has no notional state (techspec COM states: `Sd` only);
+    /// the testbed reports `notionalPrincipal` 0 after the purchase, whose
+    /// payoff is `-R(CNTRL) x QT x PPRD`.
+    #[test]
+    fn com01_purchase_has_no_notional_state() {
+        let events = ComEngine
+            .evaluate(
+                &terms(json!({
+                    "contractType": "COM",
+                    "contractID": "com01",
+                    "statusDate": "2014-12-30T00:00:00",
+                    "contractDealDate": "2014-12-15T00:00:00",
+                    "purchaseDate": "2015-03-30T00:00:00",
+                    "priceAtPurchaseDate": "700",
+                    "contractRole": "RPL",
+                    "currency": "USD",
+                    "quantity": "2",
+                    "unit": "BRL"
+                })),
+                &StateProvider::new(),
+            )
+            .expect("com01 evaluates");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, EventType::Purchase);
+        assert_eq!(events[0].payoff, dec!(1400));
+        assert_eq!(events[0].state.notional_principal, Decimal::ZERO);
     }
 }

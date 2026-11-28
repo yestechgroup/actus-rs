@@ -2,13 +2,12 @@
 //! `STK_*`).
 //!
 //! An equity position. The economic driver is the share count `quantity`
-//! (`QT`, dictionary default 1): every payoff multiplies the quantity by a per-share price, and
-//! the notional state carries the resulting position notional
-//! `sgn x QT x PPRD`. The dictionary lists `notionalPrincipal` as required
-//! for STK, but it is descriptive there (the position notional at entry);
-//! the engine derives it from `quantity x priceAtPurchaseDate`, which is
-//! the only reading consistent with the quantity-based dividend and sale
-//! payoffs.
+//! (`QT`, dictionary default 1): every payoff multiplies the quantity by a
+//! per-share price. There is no notional state (techspec STK states: `Prf`
+//! and `Sd` only; the official testbed reports `notionalPrincipal` 0). The
+//! dictionary lists `notionalPrincipal` as required for STK, but it is
+//! descriptive there and enters no payoff (stk01: `NT = 1000`,
+//! `PPRD = 1100`, `PRD` pays -1100).
 //!
 //! Conventions implemented here, resolved against the paper and the sibling
 //! engines:
@@ -25,7 +24,7 @@
 //!   before the termination date; without `DVCL` only the anchor pays.
 //!   `DVNP` missing pays zero (the schedule point is still reported).
 //! - Sale: the terminal `TD` at `terminationDate` sells the position at
-//!   `sgn x QT x PTD`, zeroes the notional and reports
+//!   `sgn x QT x PTD` and reports
 //!   [`ContractStatus::Terminated`]. The per-unit sale price resolves as
 //!   the market observation of `marketObjectCode` at `TD` (paper: "Payoffs
 //!   driven by market observations"; convention: the market object carries
@@ -158,15 +157,11 @@ pub(crate) fn evaluate_position(
     let mut state = ContractState::initial(terms);
     let mut events = Vec::new();
     for slot in slots {
-        match slot.kind {
-            Kind::InitialExchange | Kind::Purchase => {
-                state.notional_principal = (ck(sgn) * quantity * entry_price).get()?;
-            }
-            Kind::Termination => {
-                state.notional_principal = Decimal::ZERO;
-                state.contract_status = ContractStatus::Terminated;
-            }
-            Kind::Dividend => {}
+        // STK and COM carry no notional state: the techspec state tables
+        // hold only `Prf` and `Sd`, and the official testbeds report
+        // `notionalPrincipal` 0 after every event.
+        if slot.kind == Kind::Termination {
+            state.contract_status = ContractStatus::Terminated;
         }
         state.status_date = slot.time;
         events.push(ContractEvent {
@@ -345,7 +340,7 @@ mod tests {
         );
     }
 
-    /// Buy 100 shares at 50 (payoff -5000, position notional +5000), two
+    /// Buy 100 shares at 50 (payoff -5000; no notional state), two
     /// dividends of quantity x 2.5 = 250 on the DVANX/DVCL schedule, sale at
     /// TD at 55 (payoff +5500): the brief golden.
     #[test]
@@ -365,10 +360,10 @@ mod tests {
             ]
         );
         assert_eq!(events[0].payoff, dec!(-5000));
-        assert_eq!(events[0].state.notional_principal, dec!(5000));
+        assert_eq!(events[0].state.notional_principal, Decimal::ZERO);
         assert_eq!(events[1].payoff, dec!(250));
         assert_eq!(events[2].payoff, dec!(250));
-        assert_eq!(events[2].state.notional_principal, dec!(5000));
+        assert_eq!(events[2].state.notional_principal, Decimal::ZERO);
         assert_eq!(events[3].payoff, dec!(5500));
         assert_eq!(events[3].state.notional_principal, Decimal::ZERO);
         assert_eq!(events[3].state.contract_status, ContractStatus::Terminated);
@@ -408,7 +403,7 @@ mod tests {
         assert_eq!(events.len(), 3);
     }
 
-    /// `RPL` (short position) mirrors the payoffs and the notional state.
+    /// `RPL` (short position) mirrors the payoffs.
     #[test]
     fn rpl_mirrors_the_payoff_orientation() {
         let mut raw = base_terms();
@@ -417,7 +412,7 @@ mod tests {
             .evaluate(&terms(raw), &StateProvider::new())
             .expect("events");
         assert_eq!(events[0].payoff, dec!(5000));
-        assert_eq!(events[0].state.notional_principal, dec!(-5000));
+        assert_eq!(events[0].state.notional_principal, Decimal::ZERO);
         assert_eq!(events[1].payoff, dec!(-250));
         assert_eq!(events[3].payoff, dec!(-5500));
         assert_eq!(events[3].state.notional_principal, Decimal::ZERO);
@@ -448,7 +443,7 @@ mod tests {
             ]
         );
         assert_eq!(events[0].payoff, Decimal::ZERO);
-        assert_eq!(events[0].state.notional_principal, dec!(5000));
+        assert_eq!(events[0].state.notional_principal, Decimal::ZERO);
         assert_eq!(events[1].payoff, dec!(-5000));
     }
 

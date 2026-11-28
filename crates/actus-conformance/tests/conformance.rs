@@ -341,12 +341,17 @@ fn gate(testbed: &str, cases: usize, events: usize, expected_passing: &[&str]) {
 
 #[test]
 fn stk_testbed_gate() {
-    gate("stk", 10, 78, &[]);
+    gate(
+        "stk",
+        10,
+        78,
+        &["stk01", "stk02", "stk03", "stk04", "stk05"],
+    );
 }
 
 #[test]
 fn com_testbed_gate() {
-    gate("com", 4, 6, &[]);
+    gate("com", 4, 6, &["com01", "com03", "com04"]);
 }
 
 #[test]
