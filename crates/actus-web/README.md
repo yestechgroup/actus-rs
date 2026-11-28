@@ -1,6 +1,6 @@
 # ACTUS Explorer (`actus-web`)
 
-Web visualizer for the ACTUS financial contract standard (issue #1), built
+Web visualizer for the ACTUS financial contract standard, built
 with Microsoft's [WebUI framework](https://microsoft.github.io/webui/) —
 SSR templates compiled to a binary protocol, hydrated by a small
 TypeScript client that evaluates contracts locally through the
@@ -10,9 +10,9 @@ SVG/div charts; no CSS frameworks or JS chart libraries.
 ## Features
 
 - **Contract explorer**: all 21 dictionary contract types in a searchable
-  sidebar; the 8 engine-backed types (PAM, LAM, NAM, ANN, CSH, CLM, SWAPS,
-  CEC) evaluate schedules; the rest show a generic applicability-derived
-  form and degrade with an "engine not yet available" notice.
+  sidebar; the 18 engine-backed types evaluate schedules; the three without
+  an engine (BCS, CDSWP, MAR) show the applicability-derived form with an
+  "engine not yet available" notice.
 - **Applicability matrix**: 21 × 124 heatmap (`required` / base-required /
   applicable / not-applicable) with dictionary tooltips on the column
   headers; click a row to open that contract type.

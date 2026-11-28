@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "ACTUS Explorer: WebUI-based web visualizer for the ACTUS financial contract standard (issue #1)"
+description = "ACTUS Explorer: WebUI-based web visualizer for the ACTUS financial contract standard"
 
 [lib]
 name = "actus_web"

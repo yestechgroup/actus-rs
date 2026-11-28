@@ -2,7 +2,7 @@
 name = "actus-model"
 version = "0.1.0"
 edition = "2021"
-license = "Apache-2.0"
+license.workspace = true
 repository = "https://github.com/yestechgroup/actus-rs"
 description = "ACTUS Data Standard vocabulary and contract terms generated from the ACTUS dictionary"
 
