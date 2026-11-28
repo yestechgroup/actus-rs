@@ -442,12 +442,28 @@ pub fn array_series(
     bdc: BusinessDayConvention,
     cal: Calendar,
 ) -> Result<Vec<(NaiveDateTime, NaiveDateTime)>, EngineError> {
-    let Some(last_cycle) = cycles.last() else {
-        return Ok(Vec::new());
-    };
     if anchors.is_empty() {
         return Ok(Vec::new());
     }
+    let Some(last_cycle) = cycles.last() else {
+        // No cycles: every segment is its anchor alone (techspec LAX
+        // schedule, `s_i = {ARPRANX_i}` when `ARPRCL` is undefined, and the
+        // `RR`/`RRF` rows' `{t_1, t_2, ...}` when `ARRRCL` is undefined).
+        // Anchors after the schedule end do not belong to it; the end is
+        // not shifted, every other anchor is.
+        return Ok(anchors
+            .iter()
+            .filter(|anchor| **anchor <= end)
+            .map(|anchor| {
+                let emitted = if *anchor == end {
+                    *anchor
+                } else {
+                    shift_business_day(*anchor, bdc, cal)
+                };
+                (*anchor, emitted)
+            })
+            .collect());
+    };
     let cycle_at = |index: usize| cycles.get(index).unwrap_or(last_cycle);
     let mut unshifted: Vec<NaiveDateTime> = Vec::new();
     for (index, anchor) in anchors.iter().enumerate() {
@@ -1140,7 +1156,6 @@ mod tests {
 
     #[test]
     fn array_empty_inputs_yield_an_empty_schedule() {
-        let anchor = t("2026-01-01T00:00:00");
         assert!(array_schedule(
             &[],
             &[cycle(1, CyclePeriod::Month, 0)],
@@ -1151,16 +1166,36 @@ mod tests {
         )
         .unwrap()
         .is_empty());
-        assert!(array_schedule(
-            &[anchor],
+    }
+
+    /// Without cycles every anchor is a schedule element of its own
+    /// (techspec LAX schedule, `s_i = {ARPRANX_i}`); anchors past the end do
+    /// not belong to the schedule, and only the end itself is not shifted.
+    #[test]
+    fn array_anchors_without_cycles_are_the_schedule() {
+        let anchors = [
+            t("2026-01-03T00:00:00"),
+            t("2026-04-01T00:00:00"),
+            t("2026-07-04T00:00:00"),
+            t("2026-09-01T00:00:00"),
+        ];
+        let schedule = array_schedule(
+            &anchors,
             &[],
-            t("2026-07-01T00:00:00"),
+            t("2026-07-04T00:00:00"),
             EndOfMonthConvention::Sd,
-            BusinessDayConvention::Nos,
-            Calendar::Nc,
+            BusinessDayConvention::Scf,
+            Calendar::Mf,
         )
-        .unwrap()
-        .is_empty());
+        .unwrap();
+        assert_eq!(
+            schedule,
+            vec![
+                t("2026-01-05T00:00:00"),
+                t("2026-04-01T00:00:00"),
+                t("2026-07-04T00:00:00"),
+            ]
+        );
     }
 
     #[test]

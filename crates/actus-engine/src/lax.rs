@@ -258,8 +258,10 @@ impl Context {
                 }),
             terms.array_cycle_of_principal_redemption.as_ref(),
         ) {
-            (Some(anchors), Some(cycles)) if !anchors.is_empty() && !cycles.is_empty() => {
-                Some((anchors, cycles.clone()))
+            // Cycles are optional: without them each anchor is a schedule
+            // element of its own (techspec LAX schedule, `s_i = {ARPRANX_i}`).
+            (Some(anchors), cycles) if !anchors.is_empty() => {
+                Some((anchors, cycles.cloned().unwrap_or_default()))
             }
             _ => None,
         };
@@ -351,8 +353,10 @@ impl Context {
                 }),
             terms.array_cycle_of_interest_payment.as_ref(),
         ) {
-            (Some(anchors), Some(cycles)) if !anchors.is_empty() && !cycles.is_empty() => {
-                Some((anchors, cycles.clone()))
+            // Cycles are optional: without them each anchor is a schedule
+            // element of its own (techspec LAX schedule, `s_i = {ARPRANX_i}`).
+            (Some(anchors), cycles) if !anchors.is_empty() => {
+                Some((anchors, cycles.cloned().unwrap_or_default()))
             }
             _ => None,
         };
@@ -368,8 +372,10 @@ impl Context {
                 }),
             terms.array_cycle_of_rate_reset.as_ref(),
         ) {
-            (Some(anchors), Some(cycles)) if !anchors.is_empty() && !cycles.is_empty() => {
-                Some((anchors, cycles.clone()))
+            // Cycles are optional: without them each anchor is a schedule
+            // element of its own (techspec LAX schedule, `s_i = {ARPRANX_i}`).
+            (Some(anchors), cycles) if !anchors.is_empty() => {
+                Some((anchors, cycles.cloned().unwrap_or_default()))
             }
             _ => None,
         };
@@ -1543,5 +1549,49 @@ mod tests {
             .filter(|e| e.event_type == EventType::PrincipalRedemption)
             .count();
         assert_eq!(redemptions, 4);
+    }
+
+    /// lax12: arrays of anchors without cycles schedule each anchor once
+    /// (techspec LAX schedule: `s_i = {ARPRANX_i}` when `ARPRCL` is
+    /// undefined; the `IP` array likewise): five yearly redemptions of 20,
+    /// the last as `MD`, and interest on the five anchor dates.
+    #[test]
+    fn lax12_anchor_arrays_without_cycles_schedule_each_anchor() {
+        let anchors = json!([
+            "2021-01-01T00:00:00",
+            "2022-01-01T00:00:00",
+            "2023-01-01T00:00:00",
+            "2024-01-01T00:00:00",
+            "2025-01-01T00:00:00"
+        ]);
+        let mut raw = serde_json::to_value(lax04()).expect("wire");
+        let bag = raw.as_object_mut().expect("bag");
+        bag.remove("arrayCycleOfInterestPayment");
+        bag.remove("arrayCycleOfPrincipalRedemption");
+        bag.insert(
+            "arrayCycleAnchorDateOfInterestPayment".into(),
+            anchors.clone(),
+        );
+        bag.insert("arrayCycleAnchorDateOfPrincipalRedemption".into(), anchors);
+        bag.insert(
+            "arrayNextPrincipalRedemptionPayment".into(),
+            json!([20, 20, 20, 20, 20]),
+        );
+        bag.insert(
+            "arrayIncreaseDecrease".into(),
+            json!(["DEC", "DEC", "DEC", "DEC", "DEC"]),
+        );
+        let events = LaxEngine
+            .evaluate(&terms(raw), &StateProvider::new())
+            .expect("lax12 evaluates");
+        let count = |event_type| events.iter().filter(|e| e.event_type == event_type).count();
+        assert_eq!(count(EventType::PrincipalRedemption), 4);
+        assert_eq!(count(EventType::InterestPayment), 5);
+        let last = events.last().expect("events");
+        assert_eq!(
+            (last.event_type, last.time),
+            (EventType::Maturity, t("2025-01-01T00:00:00"))
+        );
+        assert_eq!(last.payoff, dec!(20));
     }
 }
