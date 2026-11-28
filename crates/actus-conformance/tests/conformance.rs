@@ -294,3 +294,102 @@ fn cec_event_count_matches_testbed() {
     assert_eq!(expected, 24, "the official CEC testbed carries 24 events");
     assert_eq!(actual, 24, "the engine must evaluate exactly 24 events");
 }
+
+// ------------------------------------------------------------------------
+// The testbeds vendored with the hand-tested types. Each gate asserts the
+// exact set of passing cases and the testbed's case and event totals, so a
+// regression and an improvement both fail the gate until it is updated.
+// A type that passes fully lists every case.
+
+/// Evaluates every case of the named testbed and returns the identifiers of
+/// the passing cases, the case count and the expected event total.
+fn passing_cases(testbed: &str) -> (Vec<String>, usize, usize) {
+    let registry = engine_registry();
+    let tol = tolerance();
+    let loaded = cases::testbed(testbed)
+        .expect("testbed is listed")
+        .load()
+        .expect("testbed loads");
+    let expected_events = loaded.iter().map(|c| c.results.len()).sum();
+    let passing = loaded
+        .iter()
+        .filter(|case| {
+            cases::evaluate_case(&registry, case)
+                .map(|events| {
+                    comparator::compare_case(case.identifier.clone(), &events, &case.results, &tol)
+                        .passed
+                })
+                .unwrap_or(false)
+        })
+        .map(|case| case.identifier.clone())
+        .collect();
+    (passing, loaded.len(), expected_events)
+}
+
+/// Asserts a testbed's totals and its exact set of passing cases.
+fn gate(testbed: &str, cases: usize, events: usize, expected_passing: &[&str]) {
+    let (passing, loaded, expected_events) = passing_cases(testbed);
+    assert_eq!(loaded, cases, "{testbed}: case count");
+    assert_eq!(expected_events, events, "{testbed}: expected event total");
+    assert_eq!(
+        passing,
+        expected_passing,
+        "{testbed}: the passing cases changed; update the gate ({}/{cases} pass)",
+        passing.len()
+    );
+}
+
+#[test]
+fn stk_testbed_gate() {
+    gate("stk", 10, 78, &[]);
+}
+
+#[test]
+fn com_testbed_gate() {
+    gate("com", 4, 6, &[]);
+}
+
+#[test]
+fn fxout_testbed_gate() {
+    gate("fxout", 12, 20, &["fxout06"]);
+}
+
+#[test]
+fn swppv_testbed_gate() {
+    gate("swppv", 14, 197, &[]);
+}
+
+#[test]
+fn capfl_testbed_gate() {
+    gate("capfl", 4, 16, &[]);
+}
+
+#[test]
+fn optns_testbed_gate() {
+    gate("optns", 23, 86, &[]);
+}
+
+#[test]
+fn futur_testbed_gate() {
+    gate("futur", 14, 50, &[]);
+}
+
+#[test]
+fn ceg_testbed_gate() {
+    gate("ceg", 14, 38, &[]);
+}
+
+#[test]
+fn ump_testbed_gate() {
+    gate("ump", 9, 63, &["ump01"]);
+}
+
+#[test]
+fn lax_testbed_gate() {
+    gate("lax", 18, 269, &["lax01", "lax02", "lax03"]);
+}
+
+#[test]
+fn ad0_testbed_gate() {
+    gate("ad0", 1, 26, &[]);
+}
