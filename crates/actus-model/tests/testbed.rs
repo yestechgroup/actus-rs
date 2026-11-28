@@ -122,14 +122,10 @@ fn cec_credit_enhancement_terms_deserialize() {
         .collect();
     assert_eq!(covered.len(), 2);
     assert_eq!(covering.len(), 1);
-    assert_eq!(
-        covered[0].object.as_ref().expect("object").contract_id,
-        Some("loan01".to_string())
-    );
+    assert_eq!(covered[0].contract_identifier(), Some("loan01"));
     assert_eq!(
         covering[0]
-            .object
-            .as_ref()
+            .embedded_contract()
             .expect("object")
             .market_object_code,
         Some("GOLD".to_string())

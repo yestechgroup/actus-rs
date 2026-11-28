@@ -164,7 +164,7 @@ fn underlying_terms(terms: &ContractTerms) -> Result<ContractTerms, EngineError>
             .iter()
             .find(|r| r.reference_role == Some(ContractReferenceRole::Underlying))
             .or_else(|| structure.first())
-            .and_then(|r| r.object.clone())
+            .and_then(|r| r.embedded_contract().cloned())
             .ok_or(EngineError::InvalidTransition(
                 "contract structure needs an underlying reference with an embedded contract \
                  object"
@@ -371,11 +371,10 @@ mod tests {
         capfl.cycle_anchor_date_of_rate_reset = None;
         capfl.cycle_of_rate_reset = None;
         capfl.market_object_code_of_rate_reset = None;
-        capfl.contract_structure = Some(vec![ContractReference {
-            object: Some(embedded_underlying(&golden()).expect("child")),
-            reference_type: Some(actus_model::ContractReferenceType::Contract),
-            reference_role: Some(ContractReferenceRole::Underlying),
-        }]);
+        capfl.contract_structure = Some(vec![ContractReference::contract(
+            embedded_underlying(&golden()).expect("child"),
+            ContractReferenceRole::Underlying,
+        )]);
         let composed = CapflEngine
             .evaluate(&capfl, &crossing_risk())
             .expect("events");

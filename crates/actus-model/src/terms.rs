@@ -886,26 +886,156 @@ pub struct ContractTerms {
 /// types address their child contracts through these entries
 /// (techspec sections 4 "Contract Composition" and 6 "Child Contract
 /// Observer", e.g. the `FirstLeg`/`SecondLeg` references of SWAPS).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// What `object` holds depends on the reference type (dictionary
+/// `contractReference.type`): a `CID` reference names a contract by its
+/// identifier (`{"contractIdentifier": "..."}`, the CEG testbed) and a `MOC`
+/// reference names a market object (`{"marketObjectCode": "..."}`, the OPTNS
+/// and FUTUR testbeds). Every other reference type (`CNT`, and `EID`, `CST`
+/// or no type, which no testbed exercises) carries an embedded contract
+/// terms bag.
+#[derive(Debug, Clone, PartialEq)]
 pub struct ContractReference {
-    /// The referenced object; a full contract terms bag for `CNT`
-    /// (contract) references.
-    #[serde(default)]
-    pub object: Option<ContractTerms>,
+    /// The referenced object.
+    pub object: Option<ReferenceObject>,
     /// Reference type `RTP` (e.g. `CNT` for an embedded contract object).
-    #[serde(
-        rename = "referenceType",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
     pub reference_type: Option<ContractReferenceType>,
     /// Reference role `RRL` (e.g. `FIL` first leg, `SEL` second leg).
-    #[serde(
-        rename = "referenceRole",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
     pub reference_role: Option<ContractReferenceRole>,
+}
+
+/// The object of a [`ContractReference`], by reference type.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReferenceObject {
+    /// An embedded contract (`CNT`).
+    Contract(Box<ContractTerms>),
+    /// The identifier of a contract (`CID`): `{"contractIdentifier": id}`.
+    ContractIdentifier(String),
+    /// The code of a market object (`MOC`): `{"marketObjectCode": code}`.
+    MarketObjectCode(String),
+}
+
+impl ContractReference {
+    /// A `CNT` reference to an embedded contract in `role`.
+    #[must_use]
+    pub fn contract(terms: ContractTerms, role: ContractReferenceRole) -> ContractReference {
+        ContractReference {
+            object: Some(ReferenceObject::Contract(Box::new(terms))),
+            reference_type: Some(ContractReferenceType::Contract),
+            reference_role: Some(role),
+        }
+    }
+
+    /// The embedded contract terms, for a contract (`CNT`) reference.
+    #[must_use]
+    pub fn embedded_contract(&self) -> Option<&ContractTerms> {
+        match &self.object {
+            Some(ReferenceObject::Contract(terms)) => Some(terms),
+            _ => None,
+        }
+    }
+
+    /// The referenced contract identifier: the identifier of a `CID`
+    /// reference, or the `contractID` of an embedded contract.
+    #[must_use]
+    pub fn contract_identifier(&self) -> Option<&str> {
+        match &self.object {
+            Some(ReferenceObject::ContractIdentifier(id)) => Some(id),
+            Some(ReferenceObject::Contract(terms)) => terms.contract_id.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// The referenced market object code, for a market object (`MOC`)
+    /// reference.
+    #[must_use]
+    pub fn market_object_code(&self) -> Option<&str> {
+        match &self.object {
+            Some(ReferenceObject::MarketObjectCode(code)) => Some(code),
+            _ => None,
+        }
+    }
+}
+
+/// Wire shape of a [`ContractReference`]; the object is decoded once the
+/// reference type is known.
+#[derive(Deserialize)]
+struct ContractReferenceWire {
+    #[serde(default)]
+    object: Option<serde_json::Value>,
+    #[serde(rename = "referenceType", default)]
+    reference_type: Option<ContractReferenceType>,
+    #[serde(rename = "referenceRole", default)]
+    reference_role: Option<ContractReferenceRole>,
+}
+
+/// Wire key of an identifier-valued reference object.
+fn identifier_key(reference_type: Option<ContractReferenceType>) -> Option<&'static str> {
+    match reference_type {
+        Some(ContractReferenceType::ContractIdentifier) => Some("contractIdentifier"),
+        Some(ContractReferenceType::MarketObjectIdentifier) => Some("marketObjectCode"),
+        _ => None,
+    }
+}
+
+impl<'de> Deserialize<'de> for ContractReference {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let wire = ContractReferenceWire::deserialize(deserializer)?;
+        let object = match wire.object {
+            None | Some(serde_json::Value::Null) => None,
+            Some(value) => Some(match identifier_key(wire.reference_type) {
+                Some(key) => {
+                    let id = value
+                        .get(key)
+                        .and_then(serde_json::Value::as_str)
+                        .ok_or_else(|| {
+                            D::Error::custom(format!(
+                                "contract reference object must be {{\"{key}\": string}}"
+                            ))
+                        })?
+                        .to_string();
+                    if key == "contractIdentifier" {
+                        ReferenceObject::ContractIdentifier(id)
+                    } else {
+                        ReferenceObject::MarketObjectCode(id)
+                    }
+                }
+                None => ReferenceObject::Contract(Box::new(
+                    ContractTerms::deserialize(value).map_err(D::Error::custom)?,
+                )),
+            }),
+        };
+        Ok(ContractReference {
+            object,
+            reference_type: wire.reference_type,
+            reference_role: wire.reference_role,
+        })
+    }
+}
+
+impl Serialize for ContractReference {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        match &self.object {
+            Some(ReferenceObject::Contract(terms)) => map.serialize_entry("object", terms)?,
+            Some(ReferenceObject::ContractIdentifier(id)) => {
+                map.serialize_entry("object", &serde_json::json!({ "contractIdentifier": id }))?;
+            }
+            Some(ReferenceObject::MarketObjectCode(code)) => {
+                map.serialize_entry("object", &serde_json::json!({ "marketObjectCode": code }))?;
+            }
+            None => map.serialize_entry("object", &Option::<()>::None)?,
+        }
+        if let Some(reference_type) = &self.reference_type {
+            map.serialize_entry("referenceType", reference_type)?;
+        }
+        if let Some(reference_role) = &self.reference_role {
+            map.serialize_entry("referenceRole", reference_role)?;
+        }
+        map.end()
+    }
 }
 
 impl ContractTerms {
@@ -1358,10 +1488,10 @@ mod tests {
             structure[0].reference_type,
             Some(crate::enums::ContractReferenceType::Contract)
         );
-        let leg1 = structure[0].object.as_ref().expect("leg1 object");
+        let leg1 = structure[0].embedded_contract().expect("leg1 object");
         assert_eq!(leg1.contract_type, ContractType::Pam);
         assert_eq!(leg1.notional_principal, Some(Decimal::from(1000)));
-        let leg2 = structure[1].object.as_ref().expect("leg2 object");
+        let leg2 = structure[1].embedded_contract().expect("leg2 object");
         assert_eq!(leg2.contract_role, Some(crate::enums::ContractRole::Rpa));
         assert_eq!(
             structure[1].reference_role,
@@ -1435,6 +1565,74 @@ mod tests {
             .filter(|(_, set)| *set)
             .collect();
         assert_eq!(presence.len(), 11);
+    }
+
+    /// A `contractStructure` object depends on the reference type: a market
+    /// object code for `MOC` (option01), a contract identifier for `CID`
+    /// (guarantee01), an embedded contract for `CNT` (swaps01).
+    #[test]
+    fn contract_reference_objects_follow_the_reference_type() {
+        use crate::enums::{ContractReferenceRole as Role, ContractReferenceType as Type};
+        let terms: ContractTerms = serde_json::from_value(serde_json::json!({
+            "contractType": "CEG",
+            "contractStructure": [
+                {"object": {"marketObjectCode": "AAPL"}, "referenceType": "MOC", "referenceRole": "UDL"},
+                {"object": {"contractIdentifier": "loan01"}, "referenceType": "CID", "referenceRole": "COVE"},
+                {"object": {"contractType": "PAM", "contractID": "leg"}, "referenceType": "CNT", "referenceRole": "FIL"},
+                {"object": null, "referenceRole": "SEL"}
+            ]
+        }))
+        .expect("references parse");
+        let s = terms.contract_structure.clone().expect("structure");
+        assert_eq!(
+            s[0].object,
+            Some(ReferenceObject::MarketObjectCode("AAPL".into()))
+        );
+        assert_eq!(s[0].market_object_code(), Some("AAPL"));
+        assert_eq!(s[0].embedded_contract(), None);
+        assert_eq!(s[0].contract_identifier(), None);
+        assert_eq!(s[0].reference_type, Some(Type::MarketObjectIdentifier));
+        assert_eq!(s[1].contract_identifier(), Some("loan01"));
+        assert_eq!(s[1].market_object_code(), None);
+        assert_eq!(s[1].reference_role, Some(Role::CoveredContract));
+        let leg = s[2].embedded_contract().expect("embedded");
+        assert_eq!(leg.contract_type, ContractType::Pam);
+        assert_eq!(s[2].contract_identifier(), Some("leg"));
+        assert_eq!(s[3].object, None);
+        assert_eq!(s[3].reference_type, None);
+        assert_eq!(
+            ContractReference::contract(leg.clone(), Role::FirstLeg),
+            s[2]
+        );
+
+        // Round trip: identifier objects re-encode in their wire shape.
+        let wire = serde_json::to_value(&terms).expect("wire");
+        assert_eq!(
+            wire["contractStructure"][0],
+            serde_json::json!({"object": {"marketObjectCode": "AAPL"}, "referenceType": "MOC", "referenceRole": "UDL"})
+        );
+        assert_eq!(
+            wire["contractStructure"][1]["object"],
+            serde_json::json!({"contractIdentifier": "loan01"})
+        );
+        assert_eq!(
+            wire["contractStructure"][3],
+            serde_json::json!({"object": null, "referenceRole": "SEL"})
+        );
+        let back: ContractTerms = serde_json::from_value(wire).expect("round trip");
+        assert_eq!(back, terms);
+
+        for bad in [
+            serde_json::json!([{"object": {"contractType": "PAM"}, "referenceType": "MOC"}]),
+            serde_json::json!([{"object": {"contractIdentifier": 7}, "referenceType": "CID"}]),
+            serde_json::json!([{"object": {"marketObjectCode": "X"}, "referenceType": "CNT"}]),
+        ] {
+            let raw = serde_json::json!({"contractType": "CEG", "contractStructure": bad});
+            assert!(
+                serde_json::from_value::<ContractTerms>(raw.clone()).is_err(),
+                "{raw}"
+            );
+        }
     }
 
     /// #44: `arrayFixedVariable` is `Enum[]`, one `F`/`V` per rate segment,

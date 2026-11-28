@@ -148,8 +148,7 @@ fn covering_value(
         .iter()
         .map(|reference| {
             let object = reference
-                .object
-                .as_ref()
+                .embedded_contract()
                 .ok_or(EngineError::InvalidTransition(
                     "covering contract reference without an embedded contract object".to_string(),
                 ))?;
