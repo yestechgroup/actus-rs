@@ -31,6 +31,56 @@ jobs:
       - name: Run rustfmt
         run: cargo fmt --all -- --check
 
+  codegen-drift:
+    # actus-model/src/generated is produced from the vendored dictionary by
+    # `cargo run -p actus-model --bin generate`; fail if the committed copy
+    # differs from a fresh run.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Regenerate the dictionary vocabulary from scratch
+        # Deleting first means a committed file the generator no longer
+        # writes also shows up as drift.
+        # The generator is built before the directory is removed, because
+        # actus-model itself compiles the generated modules.
+        run: |
+          cargo build -p actus-model --bin generate
+          rm -rf crates/actus-model/src/generated
+          ./target/debug/generate
+      - name: Fail on drift
+        run: |
+          git status --porcelain -- crates/actus-model/src/generated
+          test -z "$(git status --porcelain -- crates/actus-model/src/generated)"
+
+  deny:
+    # Licences, advisories, bans and sources (policy in deny.toml).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
+  msrv:
+    # Build and test on exactly the rust-version declared in Cargo.toml.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read rust-version from Cargo.toml
+        id: msrv
+        run: |
+          version=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Test on the MSRV with the committed lockfile
+        run: cargo test --workspace --locked
+
   coverage:
     runs-on: ubuntu-latest
     steps:

@@ -2,13 +2,14 @@
 name = "actus-conformance"
 version = "0.1.0"
 edition = "2021"
+rust-version.workspace = true
 license.workspace = true
 repository = "https://github.com/yestechgroup/actus-rs"
 description = "Conformance harness running the official ACTUS testbeds against the Rust engine"
 
 [dependencies]
-actus-model = { path = "../actus-model" }
-actus-engine = { path = "../actus-engine" }
+actus-model = { workspace = true }
+actus-engine = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
