@@ -48,6 +48,10 @@ Everything since the crates were imported from `onboarding-os`.
   loader, the `report` binary and the behaviour snapshot cover all 19
   testbeds, and each new testbed has a gate that pins its exact passing
   cases.
+- `crates/actus-conformance/verification.toml`: the verification tier of
+  every contract type (#19), checked against the testbeds in CI
+  (`tests/verification.rs`), rendered in the README and printed by
+  `report` (`report --tiers` for the Markdown).
 - `EventType` gains the testbed-attested extensions `PI`, `IPFX` and `IPFL`,
   generated from `crates/actus-model/extensions/event-types.json`, with
   `EventType::DICTIONARY`, `EventType::EXTENSIONS` and `is_dictionary()`
@@ -55,6 +59,8 @@ Everything since the crates were imported from `onboarding-os`.
 
 ### Changed
 
+- SWPPV no longer accepts a `contractStructure`; a swap composed of leg
+  contracts is SWAPS. `RFL`/`PFL` remain accepted as synonyms of `RF`/`PF`.
 - Licensed under MIT (root `LICENSE`).
 - Shared fixed-income helpers and the fixed-income event loop moved into
   `actus-engine::fixed_income`.
@@ -75,6 +81,8 @@ Everything since the crates were imported from `onboarding-os`.
   `tmax`; the wasm scenario gains `analysisHorizon`. Open-ended schedules
   (STK dividends, UMP interest) without a termination or a horizon are an
   error instead of being silently cut.
+- LAX `INC` segments are reported as `PI` instead of `PD` (SI-011,
+  superseding SI-002).
 - `ContractEngine::sequence_rank` lets an engine order same-day events
   differently; only CLM moves `XD` before `IP`.
 - `ContractTerms::array_fixed_variable` is an `Option<Vec<ArrayFixVar>>`,
@@ -83,6 +91,16 @@ Everything since the crates were imported from `onboarding-os`.
 
 ### Fixed
 
+- CEG against its official testbed, 0/14 → 13/14 (#48, SI-012): a `PRD`
+  purchase event; `CID` references match credit events by identifier and
+  guarantee the contract's own `NT`; every state carries the coverage
+  `CECV`; `STD` settles the exercise amount plus the accrued fee. The
+  remaining case, guarantee14, expects a truncated `STD`.
+- SWPPV re-derived as the techspec's standalone contract, 0/14 → 13/14
+  (#49, #5, SI-010, SI-013 to SI-016): `RF`/`PF` roles, the floating rate
+  from `nominalInterestRate2`, per-leg `IPFX`/`IPFL` interest when
+  delivered and a net `IP` when cash-settled, `PRD` and `TD`, no principal
+  exchange. The remaining case, swppv13, expects an unsigned `TD`.
 - The hand-tested types against their official testbeds (SI-006 to
   SI-009):
   - STK and COM: `quantity` defaults to 1, no notional state, an optional

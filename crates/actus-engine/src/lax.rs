@@ -20,9 +20,9 @@
 //! - `INC` segments increase the principal (techspec LAX functions table,
 //!   `PI` row; actus-core schedules `PI` for `INC` segments): each schedule
 //!   element draws `ARPRNXT[i]`, paying `-sgn x Nsc x Prnxt` and growing the
-//!   notional by `sgn x Prnxt`. The v1.4 dictionary has no `PI` event type,
-//!   so these events are reported as `PD` (principal drawing), see SI-002 in
-//!   `docs/spec-interpretations.md`.
+//!   notional by `sgn x Prnxt`. They are reported as `PI`, the
+//!   testbed-attested extension of the v1.4 event vocabulary (lax16-lax18;
+//!   SI-011 in `docs/spec-interpretations.md`, superseding SI-002's `PD`).
 //!
 //! The `IP` interest series runs on the array interest schedule
 //! (`ARIPANX`/`ARIPCL`) when present, otherwise on the scalar `IPANX`/`IPCL`
@@ -123,7 +123,7 @@ impl Slot {
 enum Kind {
     InitialExchange,
     PrincipalRedemption,
-    PrincipalDrawing,
+    PrincipalIncrease,
     InterestPayment,
     InterestCapitalization,
     InterestCalculationBaseFixing,
@@ -145,7 +145,7 @@ impl Kind {
         match self {
             Kind::InitialExchange => EventType::InitialExchange,
             Kind::PrincipalRedemption => EventType::PrincipalRedemption,
-            Kind::PrincipalDrawing => EventType::PrincipalDrawing,
+            Kind::PrincipalIncrease => EventType::PrincipalIncrease,
             Kind::InterestPayment => EventType::InterestPayment,
             Kind::InterestCapitalization => EventType::InterestCapitalization,
             Kind::InterestCalculationBaseFixing => EventType::InterestCalculationBaseFixing,
@@ -493,7 +493,7 @@ impl Context {
                 }
                 let segment = Self::segment_of(anchors, *unshifted);
                 let kind = if self.segment_increases(segment) {
-                    Kind::PrincipalDrawing
+                    Kind::PrincipalIncrease
                 } else {
                     Kind::PrincipalRedemption
                 };
@@ -746,11 +746,11 @@ impl Context {
                     scheduled.min(state.notional_principal.abs());
                 (ck(self.sgn) * state.notional_scaling_multiplier * redemption).get()?
             }
-            Kind::PrincipalDrawing => {
+            Kind::PrincipalIncrease => {
                 // `INC` segments (techspec LAX functions table, `PI` row):
                 // `pof = sgn x (-1) x Nsc x Prnxt`, `Nt+ = Nt- + sgn x
                 // Prnxt`, the accrual and the `IPCB = NT` base follow the
-                // grown notional. Reported as `PD` (SI-002).
+                // grown notional. Reported as `PI` (SI-011).
                 state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
                 let drawn = self.scheduled_redemption(slot.segment, state);
                 state.notional_principal =
@@ -1209,9 +1209,9 @@ mod tests {
     /// An `INC` segment increases the principal (techspec LAX functions
     /// table, `PI` row: `pof = sgn x (-1) x Nsc x Prnxt`, `Nt+ = Nt- + sgn x
     /// Prnxt`; actus-core `ExoticLinearAmortizer` schedules `PI` for `INC`
-    /// and `PR` for `DEC`). The dictionary v1.4 event vocabulary has no
-    /// `PI`, so the increase is reported as `PD` (principal drawing), see
-    /// SI-002 in docs/spec-interpretations.md. With NT = 5000 at 8% `A365`,
+    /// and `PR` for `DEC`). It is reported as `PI`, the testbed-attested
+    /// extension of the event vocabulary (lax16-lax18; SI-011, superseding
+    /// SI-002's `PD`). With NT = 5000 at 8% `A365`,
     /// each of the nine monthly drawings pays out `ARPRNXT = 30`, the
     /// notional grows by 30, and interest accrues on the grown base
     /// (`IPCB = NT`); the maturity repays 5000 + 9 x 30 = 5270.
@@ -1225,7 +1225,7 @@ mod tests {
             .all(|e| e.event_type != EventType::PrincipalRedemption));
         let drawings: Vec<&ContractEvent> = events
             .iter()
-            .filter(|e| e.event_type == EventType::PrincipalDrawing)
+            .filter(|e| e.event_type == EventType::PrincipalIncrease)
             .collect();
         assert_eq!(drawings.len(), 9);
         let first = drawings[0];

@@ -61,6 +61,10 @@ payoff is not the mirror image of the `RPA` one.
 
 ## SI-002: LAX `INC` segments are principal increases, reported as `PD`
 
+> **Superseded by SI-011.** The LAX testbed, vendored after this entry,
+> expects `PI` for these events (lax16–lax18). The amounts and the
+> direction decided here stand; only the label changed.
+
 **Section.** LAX schedule (techspec l. 1298, `PI` row) and LAX functions
 table (l. 1402):
 
@@ -139,7 +143,8 @@ choice:
 | −1 | `RPL`, `PFL`, `PF`, `SEL`, `UDLM` |
 | +1 | `RPA`, `RFL`, `RF`, `BUY`, `COL`, `CNO`, `UDL`, `UDLP`, and an unset role |
 
-SWAPS and SWPPV still accept only their leg roles `RFL`/`PFL`.
+SWAPS still accepts only its leg roles `RFL`/`PFL`. SWPPV accepts the
+dictionary's swap roles `RF`/`PF` and keeps `RFL`/`PFL` as synonyms (#49).
 
 **Evidence.**
 - *Techspec.* The table above.
@@ -416,3 +421,215 @@ untouched; the `ad0` gate pins the case as failing (0/1).
   fixed-income engines do not yet replay custom `AD` dates at all (only CSH
   does). That gap is filed separately; it is a feature for user-supplied
   analysis dates, not something this case can decide.
+
+---
+
+## SI-011: LAX `INC` segments are reported as `PI` (supersedes SI-002)
+
+**Section.** LAX schedule and functions, the `PI` rows (techspec l. 1298,
+l. 1402); the event type extensions of SI-005.
+
+**Question.** SI-002 reported the principal increases of `INC` segments as
+the dictionary's `PD`, because the v1.4 event vocabulary has no `PI` and
+"no official testbed covers LAX `INC` segments". The LAX testbed vendored
+since does.
+
+**Readings.** `PD` (SI-002) or `PI` (the techspec, now an `EventType`
+extension under SI-005).
+
+**Chosen.** `PI`. A testbed outranks the earlier decision, which rested on
+weaker evidence (`CONTRIBUTING.md`). SI-002's amounts and directions are
+unchanged: `POF_PI = R · (−1) · Nsc · Prnxt`, `Nt⁺ = Nt⁻ + R · Prnxt`,
+without actus-core's `PR` cap.
+
+**Evidence.** lax16, lax17 and lax18 expect 18 `PI` events. With `PD` all
+three fail at their first increase; with `PI` they pass (LAX 15/18 → 18/18).
+Their payoffs and notionals match SI-002's amounts, so the uncapped
+techspec `PI` row is confirmed too (no case draws more than the
+outstanding notional, so the cap question itself stays undecided by
+testbed). This settles the label question SI-002 left open for #37.
+
+---
+
+## SI-010: SWPPV reports per-leg interest (`IPFX`, `IPFL`) when delivered, net `IP` when cash-settled
+
+**Section.** SWPPV schedule and functions (techspec l. 2107–2235): `IP`
+when `DS = 'S'`; `IP^(fix)` and `IP^(var)` when `DS = 'D'`; the extension
+tokens `IPFX`/`IPFL` (SI-005). SWAPS schedule (l. 2240 ff.).
+
+**Question.** How should the engine report a plain vanilla swap's interest:
+always net, as the paper-derived engine does, or per leg?
+
+**Readings.**
+
+1. Always one net `IP` (the paper; simplest for consumers).
+2. Per the techspec and the testbed: one net `IP` when `DS = 'S'`, and the
+   two leg payments `IPFX` (`R · (Ipac1 + Y · IPNR · Nt)`) and `IPFL`
+   (`R · (Ipac2 − Y · Ipnr · Nt)`) when `DS = 'D'`, the dictionary
+   default.
+
+**Chosen.** Reading 2.
+
+**Evidence.**
+- *Testbed.* The 10 `DS = 'D'` cases (swppv01–05, 08, 09, 12–14) expect 45
+  `IPFX` and 45 `IPFL` events, `IPFX` before `IPFL` on each date; the 4
+  `DS = 'S'` cases (swppv06, 07, 10, 11) expect a net `IP`.
+- *SWAPS consistency.* The SWAPS testbed (11/11) already follows the same
+  rule for composed legs: congruent leg events merge into one net event for
+  cash settlement and stay separate for delivery. Per-leg SWPPV interest
+  under `D` is the same rule applied to the two interest legs of the
+  standalone swap.
+- *Consumers.* The wasm API serializes event types by acronym, so `IPFX`
+  and `IPFL` reach the Explorer as two event types next to `IP`, with the
+  identifiers `interestPaymentFixedLeg` and `interestPaymentFloatingLeg`.
+  A consumer that wants the net amount sums the two payoffs of a date. The
+  Explorer needs labels for the two tokens (#14).
+
+**Status.** Implemented with the standalone SWPPV contract (#49): all 14
+cases report their interest as the testbed expects (SWPPV 13/14; swppv13
+fails only on its `TD` sign, SI-016).
+
+---
+
+## SI-012: CEG guarantees its own `NT` for `CID` references and settles `Xa + Feac`; guarantee14's `STD` is truncated (testbed defect)
+
+**Section.** "CEG: Credit Enhancement Guarantee" (techspec l. 2541 ff.):
+the `Nt` and `Feac` states, the `PRD`, `FP`, `XD` and `STD` functions.
+Dictionary `contractReference.type` (`CID`: "an identifier of an actual
+contract").
+
+**Questions and readings.**
+
+1. *What does a guarantee cover when it names its covered contract only by
+   identifier?* There is no child to observe. The states table reads
+   `Nt = CECV · sgn · NT` when `NT` is set, and only otherwise the sum
+   over the covered children.
+2. *Do the event states carry the coverage?* The paper-derived engine
+   reported the uncovered exposure in `FP` states and applied `CECV` only
+   to the protection.
+3. *What does `STD` pay?* The paper: the exposure. The techspec:
+   `Xa + Feac`, the exercise amount plus the fee accrued since the last
+   fee payment.
+4. *Over which period does an absolute fee (`FEB = A`) accrue?*
+   `Feac = Y(tFP⁻, t) / Y(tFP⁻, tFP⁺) · sgn · FER`, with `tFP⁺` the
+   schedule point after `t`. Under a long last stub (`L0`), the next
+   schedule point can be the stub end instead of the next regular point.
+
+**Chosen.**
+- `Nt` per the techspec: `CECV · sgn · NT` when `NT` is set, else
+  `CECV · sgn · Σ nᵢ`. Every state (`PRD`, `FP`, `XD`) reports it; a `CID`
+  reference without `NT` is an error.
+- `CID` references match observed credit events by their identifier.
+- `PRD` pays `−sgn · PPRD` (`POF_PRD_STK`).
+- `STD` pays `Nt + Feac`; `tFP⁺` is one regular fee cycle after `tFP⁻`.
+
+**Evidence.**
+- *Testbed.* guarantee01–08 use `CID` references with `NT = 1000000`;
+  guarantee06 and 08 (`CECV = 0.7`) expect `PRD`/`XD` notionals of
+  ±700,000 and `STD` of ±700,000. guarantee14 expects `FP` notionals of
+  5.5M, 4.75M and 4M: `0.5 ×` the covered exposure (the old engine
+  reported 11M).
+- *Fee period.* guarantee14 (`P3ML0`, maturity 2021-01-01, credit event
+  2020-09-20) accrues `80/92` of the 10,000 fee: the regular quarter
+  2020-07-02 to 2020-10-02. The stub-end reading (`80/183`) settles
+  3,504,371.58.
+- *Testbed defect.* guarantee14 expects `STD = 3508695`. The techspec
+  gives 3,500,000 + 10,000 · 80/92 = 3,508,695.65; no reading of the
+  inputs produces the integer, which is that value truncated. The engine
+  keeps the techspec value, the CEG gate pins guarantee14 as failing
+  (13/14), and the vendored file stays untouched.
+
+---
+
+## SI-013: SWPPV reports the fixed-leg accrual `Ipac1` as `accruedInterest`
+
+**Section.** SWPPV states (techspec l. 2150 ff.): `Ipac` (net), `Ipac1`
+(fixed leg), `Ipac2` (floating leg).
+
+**Question.** Which accrual is the reported `accruedInterest` state?
+
+**Readings.** The net `Ipac = Ipac1 − Ipac2` (#49 assumed this), or the
+fixed-leg `Ipac1`.
+
+**Chosen.** `Ipac1`. The engine keeps `Ipac2` internally; the net accrual
+is their difference.
+
+**Evidence.** Only the three `PRD` events carry a non-zero accrual:
+- swppv14 (`RF`, `IPNR = 0.05`, `Ipnr = IPNR2 = 0.08`, 74 days) expects
+  10.137 = 74/365 · 0.05 · 1000. The net would be −6.082.
+- swppv12 and swppv13 (`PF`, `Ipnr = IPNR = 0.05`) expect −2.0548. The net
+  would be 0.
+
+Every other event follows a payment or a reset on the same date, so it
+reports 0 under both readings.
+
+---
+
+## SI-014: SWPPV interest payoffs apply the role sign once, through `Nt`
+
+**Section.** SWPPV functions (techspec l. 2207–2216):
+`POF_IP = X · sgn · (Ipac + Y · (IPNR − Ipnr) · Nt)`, and the same `sgn`
+in `IP^(fix)` and `IP^(var)`.
+
+**Question.** `Nt = sgn · NT` is already role-signed, so the literal
+formula multiplies by `sgn` twice and cancels the role. PAM's `POF_IP`
+has no `sgn`.
+
+**Readings.** Literal (`sgn` twice), or once through `Nt`, as PAM.
+
+**Chosen.** Once, through `Nt`.
+
+**Evidence.** *Flip experiment.* Applying the second `sgn` to `IPFX` fails
+every `PF` case delivered physically: swppv01, 02, 04, 08, 12 and 13. For
+example, swppv02 (`PF`) expects `IPFX = −8.08` = 59/365 · 0.05 · (−1000).
+
+---
+
+## SI-015: SWPPV `IPFL` pays `−(Ipac2 + Y · Ipnr · Nt)`: the techspec's floating-leg sign is a typo
+
+**Section.** SWPPV functions, `IP^(var)` (techspec l. 2215):
+`X · sgn · (Ipac2 − Y · Ipnr · Nt)`.
+
+**Question.** The floating leg is the opposite of the fixed leg
+`Ipac1 + Y · IPNR · Nt`, and `Ipac2` accrues `+Y · Ipnr · Nt` (states
+table, `PRD`, `RR`). The literal formula subtracts the current period
+but adds the carried part.
+
+**Readings.** Literal, or the whole floating accrual negated:
+`−(Ipac2 + Y · Ipnr · Nt)`.
+
+**Chosen.** The negated whole.
+
+**Evidence.** The readings differ only when `Ipac2` is carried, i.e. after
+a `PRD` between payment dates. swppv12 (`PF`, `PRD` 2015-03-15, last
+payment 2015-03-01) expects the first `IPFL` = 4.2466 = 31/365 · 0.05 ·
+1000, the whole period. The literal reading gives
+−2.0548 + 2.1918 = 0.137. swppv13 and swppv14 fail the same way.
+
+---
+
+## SI-016: SWPPV keeps `Ipnr` at `TD` and `MD`; swppv13's `TD` sign is a testbed defect
+
+**Section.** SWPPV functions: `PR` and `TD` set `Ipnr = 0` (techspec
+l. 2188, l. 2199); `TD` pays `POF_TD_STK = X · R(CNTRL) · PTD`.
+
+**Questions and readings.**
+
+1. *Is the floating rate reset to 0 at the end of the contract?*
+2. *Is the `TD` payoff role-signed?*
+
+**Chosen.**
+1. No. `MD` and `TD` zero the notional and the accruals, and the reported
+   rate stays the last floating rate.
+2. Yes, `sgn · PTD`, as SI-007 decided for FXOUT.
+
+**Evidence.**
+- *Rate (flip experiment).* Zeroing `Ipnr` at `MD`/`TD` fails 13 of the 14
+  cases (all but swppv01, whose final rate 0.01 is within the absolute
+  tolerance of 0). swppv02 expects `MD` with `nominalInterestRate` 0.03.
+- *`TD` sign: a testbed defect.* swppv13 is `PF` with `PTD = 400` and
+  expects `TD = +400`; the techspec gives `−400`. Its own `PRD` is
+  role-signed (`−sgn · PPRD = −600` for `PPRD = −600`), the same split as
+  fxout10. An unsigned `TD` would pass swppv13 and change no other case
+  (swppv14 is `RF`). The engine keeps the signed payoff, the SWPPV gate
+  pins swppv13 as failing (13/14), and the vendored file stays untouched.

@@ -377,7 +377,15 @@ fn fxout_testbed_gate() {
 
 #[test]
 fn swppv_testbed_gate() {
-    gate("swppv", 14, 197, &[]);
+    gate(
+        "swppv",
+        14,
+        197,
+        &[
+            "swppv01", "swppv02", "swppv03", "swppv04", "swppv05", "swppv06", "swppv07", "swppv08",
+            "swppv09", "swppv10", "swppv11", "swppv12", "swppv14",
+        ],
+    );
 }
 
 #[test]
@@ -397,7 +405,26 @@ fn futur_testbed_gate() {
 
 #[test]
 fn ceg_testbed_gate() {
-    gate("ceg", 14, 38, &[]);
+    gate(
+        "ceg",
+        14,
+        38,
+        &[
+            "guarantee01",
+            "guarantee02",
+            "guarantee03",
+            "guarantee04",
+            "guarantee05",
+            "guarantee06",
+            "guarantee07",
+            "guarantee08",
+            "guarantee09",
+            "guarantee10",
+            "guarantee11",
+            "guarantee12",
+            "guarantee13",
+        ],
+    );
 }
 
 #[test]
@@ -407,11 +434,7 @@ fn ump_testbed_gate() {
 
 #[test]
 fn lax_testbed_gate() {
-    let passing = [
-        "lax01", "lax02", "lax03", "lax04", "lax05", "lax06", "lax07", "lax08", "lax09", "lax10",
-        "lax11", "lax12", "lax13", "lax14", "lax15",
-    ];
-    gate("lax", 18, 269, &passing);
+    gate_complete("lax", 18, 269);
 }
 
 #[test]

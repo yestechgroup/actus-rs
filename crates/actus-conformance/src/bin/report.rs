@@ -4,8 +4,9 @@
 //! single type named as the command line argument, e.g. `report PAM`) and
 //! prints the metadata header from `[package.metadata.actus]`, one PASS/FAIL
 //! line per case, per-type counts, the TOTAL aggregates and the overall
-//! conformance verdict. Exits 0 on full conformance, 1 otherwise and 2 on
-//! load or usage errors.
+//! conformance verdict, followed by the verification tier table. Exits 0 on
+//! full conformance, 1 otherwise and 2 on load or usage errors.
+//! `report --tiers` prints the tier table as Markdown (the README section).
 
 use std::fs;
 use std::path::Path;
@@ -121,6 +122,22 @@ fn heading(testbed: cases::Testbed) -> String {
 
 fn main() -> ExitCode {
     let filter = std::env::args().nth(1);
+    if filter.as_deref() == Some("--tiers") {
+        // The verification tier table as Markdown (the README section).
+        return match actus_conformance::verification::load() {
+            Ok(table) => {
+                print!(
+                    "{}",
+                    actus_conformance::verification::markdown_table(&table)
+                );
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("verification.toml: {e}");
+                ExitCode::from(2)
+            }
+        };
+    }
     let registry = engine_registry();
     let tol = comparator::Tolerance::default();
 
@@ -190,6 +207,23 @@ fn main() -> ExitCode {
         all_passed = false;
     }
     println!();
+    if let Ok(table) = actus_conformance::verification::load() {
+        println!("VERIFICATION TIERS (verification.toml)");
+        for row in &table {
+            let testbeds: Vec<String> = row
+                .testbeds
+                .iter()
+                .map(|c| format!("{} {}/{}", c.name, c.passing, c.cases))
+                .collect();
+            println!(
+                "  {:<6} {:<5} {}",
+                row.contract_type.to_string(),
+                row.tier.to_string(),
+                testbeds.join(", ")
+            );
+        }
+        println!();
+    }
     println!("CONFORMANCE: {}", if all_passed { "PASS" } else { "FAIL" });
     if all_passed {
         ExitCode::SUCCESS

@@ -11,6 +11,8 @@
 //!   differential layer (D1).
 //! - [`oracle`]: the independent in-Rust fixed-income oracle (PAM, LAM,
 //!   NAM, ANN) with its own fixed point numerical regime (D3).
+//! - [`verification`]: the per-type verification tier table
+//!   (`verification.toml`), checked against the testbeds.
 //! - `engine_registry`: the engine registry used by the conformance runs,
 //!   with one registered implementation per supported contract type.
 //!
@@ -26,6 +28,7 @@ pub mod cases;
 pub mod comparator;
 pub mod corpus;
 pub mod oracle;
+pub mod verification;
 
 use actus_engine::EngineRegistry;
 

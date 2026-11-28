@@ -34,7 +34,9 @@ fn decimal(value: &Value) -> rust_decimal::Decimal {
 ///   its own role (techspec CAPFL: `CNTRL = RPA` for the child), so only
 ///   the payoffs mirror.
 ///
-/// SWAPS and SWPPV accept only the leg roles `RFL`/`PFL` and are excluded.
+/// SWAPS accepts only the leg roles `RFL`/`PFL` and SWPPV only `RF`/`PF` (and
+/// their `RFL`/`PFL` synonyms), so both are excluded; the SWPPV unit tests
+/// check that `RF` mirrors `PF`.
 #[test]
 fn role_sign_groups_agree_and_mirror() {
     let mut compared = 0;
