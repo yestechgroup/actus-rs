@@ -7,7 +7,7 @@
 //! ([`crate::stk::evaluate_position`]) with [`Dividends::None`]:
 //!
 //! - Entry: the purchase cash flow `-sgn x QT x PPRD` settles at
-//!   `purchaseDate` (required), or at `initialExchangeDate` when set and
+//!   `purchaseDate` (optional; then `PPRD` is required), or at `initialExchangeDate` when set and
 //!   coinciding; differing `IED`/`PRD` split into a zero-payoff exchange
 //!   event and a purchase event carrying the price.
 //! - Sale: the terminal `TD` at `terminationDate` sells at
@@ -186,13 +186,13 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].state.contract_status, ContractStatus::Active);
 
-        // `quantity` defaults to 1, so the first missing attribute of an
-        // empty bag is the price.
+        // An empty bag has no purchase, sale or dividend in the window: an
+        // empty stream (`quantity` defaults to 1, the purchase is optional).
         let empty = ContractTerms::new(ContractType::Com);
-        assert!(matches!(
-            ComEngine.evaluate(&empty, &StateProvider::new()),
-            Err(EngineError::MissingAttribute("priceAtPurchaseDate"))
-        ));
+        assert!(ComEngine
+            .evaluate(&empty, &StateProvider::new())
+            .expect("empty bag")
+            .is_empty());
         let mut raw = base_terms();
         raw.as_object_mut().unwrap().remove("priceAtPurchaseDate");
         assert!(matches!(
@@ -227,5 +227,33 @@ mod tests {
         assert_eq!(events[0].event_type, EventType::Purchase);
         assert_eq!(events[0].payoff, dec!(1400));
         assert_eq!(events[0].state.notional_principal, Decimal::ZERO);
+    }
+
+    /// com02: a holding without a purchase in the analysis window has no
+    /// `PRD` event (techspec PRD schedule "Same as PAM": only when `PRD` is
+    /// set); the sale still pays `R(CNTRL) x QT x PTD`.
+    #[test]
+    fn com02_without_purchase_only_sells() {
+        let events = ComEngine
+            .evaluate(
+                &terms(json!({
+                    "contractType": "COM",
+                    "contractID": "com02",
+                    "statusDate": "2014-12-30T00:00:00",
+                    "contractDealDate": "2014-12-15T00:00:00",
+                    "terminationDate": "2015-11-30T00:00:00",
+                    "priceAtTerminationDate": "900",
+                    "contractRole": "RPA",
+                    "currency": "USD",
+                    "marketValueObserved": "50",
+                    "quantity": "2",
+                    "unit": "BRL"
+                })),
+                &StateProvider::new(),
+            )
+            .expect("com02 evaluates");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, EventType::Termination);
+        assert_eq!(events[0].payoff, dec!(1800));
     }
 }

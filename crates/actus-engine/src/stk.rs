@@ -13,7 +13,8 @@
 //! engines:
 //!
 //! - Entry: the purchase cash flow `-sgn x QT x PPRD` settles at
-//!   `purchaseDate` (`PRD`, required by the applicability) or, when
+//!   `purchaseDate` (`PRD`; optional, as in the techspec PRD schedule
+//!   "Same as PAM", and then `PPRD` is required) or, when
 //!   `initialExchangeDate` is set, at the exchange date if both coincide.
 //!   When `IED` and `PRD` differ, `IED` emits as a zero-payoff agreement
 //!   event and the price settles at `PRD`.
@@ -95,17 +96,22 @@ pub(crate) fn evaluate_position(
     // `QT` defaults to 1 (dictionary `quantity` default); every STK case of
     // the official testbed omits it.
     let quantity = terms.quantity.unwrap_or(Decimal::ONE);
-    let entry_price = terms
-        .price_at_purchase_date
-        .ok_or(EngineError::MissingAttribute("priceAtPurchaseDate"))?;
     let sgn = role_sign(terms);
     let t0 = ContractState::initial(terms).status_date;
     let ied = terms.initial_exchange_date.map(normalize_timestamp);
     let purchase = terms.purchase_date.map(normalize_timestamp);
     let termination = terms.termination_date.map(normalize_timestamp);
-    let entry_time = ied
-        .or(purchase)
-        .ok_or(EngineError::MissingAttribute("purchaseDate"))?;
+    // The entry is optional: the techspec PRD schedule is "Same as PAM"
+    // (an event only when `PRD` is set), and a holding acquired before the
+    // analysis window has none (com02, stk08-stk10). Its price is required
+    // only when there is an entry to pay it.
+    let entry_time = ied.or(purchase);
+    let entry_price = match entry_time {
+        Some(_) => terms
+            .price_at_purchase_date
+            .ok_or(EngineError::MissingAttribute("priceAtPurchaseDate"))?,
+        None => Decimal::ZERO,
+    };
 
     let mut slots: Vec<Slot> = Vec::new();
     let price_moves_with_purchase = purchase.is_some() && purchase != ied;
@@ -217,7 +223,7 @@ fn dividend_slots(
     terms: &ContractTerms,
     quantity: Decimal,
     sgn: Decimal,
-    entry: NaiveDateTime,
+    entry: Option<NaiveDateTime>,
     t0: NaiveDateTime,
     termination: Option<NaiveDateTime>,
     slots: &mut Vec<Slot>,
@@ -240,7 +246,7 @@ fn dividend_slots(
         None => vec![anchor],
     };
     for time in rolls {
-        if time <= entry || time <= t0 {
+        if entry.is_some_and(|entry| time <= entry) || time <= t0 {
             continue;
         }
         if termination.is_some_and(|td| time >= td) {
@@ -494,11 +500,13 @@ mod tests {
     /// Missing required attributes are reported.
     #[test]
     fn missing_required_attributes_are_reported() {
+        // An empty bag has no purchase, sale or dividend in the window: an
+        // empty stream (`quantity` defaults to 1, the purchase is optional).
         let empty = ContractTerms::new(ContractType::Stk);
-        assert!(matches!(
-            StkEngine.evaluate(&empty, &StateProvider::new()),
-            Err(EngineError::MissingAttribute("priceAtPurchaseDate"))
-        ));
+        assert!(StkEngine
+            .evaluate(&empty, &StateProvider::new())
+            .expect("empty bag")
+            .is_empty());
         let mut raw = base_terms();
         raw.as_object_mut().unwrap().remove("priceAtPurchaseDate");
         assert!(matches!(

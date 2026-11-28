@@ -351,7 +351,7 @@ fn stk_testbed_gate() {
 
 #[test]
 fn com_testbed_gate() {
-    gate("com", 4, 6, &["com01", "com03", "com04"]);
+    gate("com", 4, 6, &["com01", "com02", "com03", "com04"]);
 }
 
 #[test]
