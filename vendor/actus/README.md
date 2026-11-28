@@ -95,6 +95,11 @@ in-Rust oracle only (`crates/actus-conformance/src/oracle.rs`, `tests/differenti
 7. The LAX testbed spells `arrayFixedVariable` elements **`FIX`/`VAR`**, the
    dictionary description's spelling, not the acronyms `F`/`V`; both parse
    (`enums.rs`, `ArrayFixVar`).
+8. The testbeds use **three event types the v1.4 dictionary lacks**: `PI`
+   (LAX principal increase) and `IPFX`/`IPFL` (SWPPV fixed and floating leg
+   interest). The techspec defines all three. `actus-model` adds them through
+   its generator from `crates/actus-model/extensions/event-types.json`
+   (`docs/spec-interpretations.md`, SI-005).
 
 ## Purpose
 

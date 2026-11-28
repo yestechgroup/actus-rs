@@ -63,14 +63,18 @@ fn event_type_covers_the_event_dictionary() {
     let allowed = doc["event"]["eventType"]["allowedValues"]
         .as_array()
         .expect("allowedValues array");
-    assert_eq!(EventType::ALL.len(), allowed.len());
+    assert_eq!(EventType::DICTIONARY.len(), allowed.len());
 
     let dictionary: BTreeSet<&str> = allowed
         .iter()
         .map(|e| e["acronym"].as_str().expect("acronym"))
         .collect();
-    let generated: BTreeSet<&str> = EventType::ALL.iter().map(|e| e.as_acronym()).collect();
+    let generated: BTreeSet<&str> = EventType::DICTIONARY
+        .iter()
+        .map(|e| e.as_acronym())
+        .collect();
     assert_eq!(generated, dictionary);
+    assert!(EventType::DICTIONARY.iter().all(EventType::is_dictionary));
 
     for entry in allowed {
         let acronym = entry["acronym"].as_str().expect("acronym");
@@ -92,6 +96,74 @@ fn event_type_covers_the_event_dictionary() {
         }
         other => panic!("expected UnknownEnumValue, got {other:?}"),
     }
+}
+
+/// Every event type the vendored testbeds expect, by acronym.
+fn testbed_event_acronyms() -> BTreeSet<String> {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendor/actus/tests");
+    let mut out = BTreeSet::new();
+    for entry in std::fs::read_dir(&dir).expect("vendored testbeds") {
+        let path = entry.expect("dir entry").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let raw = std::fs::read_to_string(&path).expect("testbed readable");
+        let cases: serde_json::Value = serde_json::from_str(&raw).expect("testbed is JSON");
+        for case in cases.as_object().expect("cases object").values() {
+            for event in case["results"].as_array().into_iter().flatten() {
+                out.insert(event["eventType"].as_str().expect("eventType").to_string());
+            }
+        }
+    }
+    out
+}
+
+/// SI-005: the extensions are exactly the event types the vendored testbeds
+/// use and the dictionary lacks, so the vocabulary is widened only by
+/// testbed evidence, and only as far as it reaches.
+#[test]
+fn event_type_extensions_are_exactly_the_testbed_attested_ones() {
+    let doc = read_dictionary("actus-dictionary-event.json").expect("event dictionary parses");
+    let dictionary: BTreeSet<String> = doc["event"]["eventType"]["allowedValues"]
+        .as_array()
+        .expect("allowedValues array")
+        .iter()
+        .map(|e| e["acronym"].as_str().expect("acronym").to_string())
+        .collect();
+    let attested: BTreeSet<String> = testbed_event_acronyms()
+        .difference(&dictionary)
+        .cloned()
+        .collect();
+    let extensions: BTreeSet<String> = EventType::EXTENSIONS
+        .iter()
+        .map(|e| e.as_acronym().to_string())
+        .collect();
+    assert_eq!(extensions, attested);
+    assert_eq!(
+        extensions,
+        ["IPFL", "IPFX", "PI"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    );
+    assert_eq!(
+        EventType::ALL.len(),
+        EventType::DICTIONARY.len() + EventType::EXTENSIONS.len()
+    );
+    for extension in EventType::EXTENSIONS {
+        assert!(!extension.is_dictionary());
+        let parsed: EventType = extension.as_acronym().parse().expect("parses");
+        assert_eq!(parsed, *extension);
+        let json = serde_json::to_string(extension).expect("serializes");
+        assert_eq!(json, format!("\"{}\"", extension.as_acronym()));
+    }
+    assert_eq!(EventType::PrincipalIncrease.priority(), 3);
+    assert_eq!(EventType::InterestPaymentFixedLeg.priority(), 8);
+    assert_eq!(EventType::InterestPaymentFloatingLeg.priority(), 8);
+    assert_eq!(
+        EventType::PrincipalIncrease.identifier(),
+        "principalIncrease"
+    );
 }
 
 #[test]

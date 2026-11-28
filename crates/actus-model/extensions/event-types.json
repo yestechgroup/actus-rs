@@ -1,0 +1,32 @@
+{
+    "description": "Event types the official actusfrf testbeds (vendor/actus/tests) and the techspec use but the v1.4 dictionary event vocabulary lacks. The generator appends them to EventType; tests/dictionary.rs checks this list is exactly the set of non-dictionary event types in the vendored testbeds. See docs/spec-interpretations.md SI-005.",
+    "eventTypes": [
+        {
+            "acronym": "PI",
+            "identifier": "principalIncrease",
+            "name": "Principal Increase",
+            "sequence": "3",
+            "sequenceReason": "the PR sequence: PI is the ARINCDEC=INC counterpart of PR in the LAX schedule; the LAX testbed orders same-day PI before IP",
+            "techspec": "LAX schedule l. 1298, LAX functions l. 1402",
+            "testbeds": ["actus-tests-lax.json"]
+        },
+        {
+            "acronym": "IPFX",
+            "identifier": "interestPaymentFixedLeg",
+            "name": "Interest Payment Fixed Leg",
+            "sequence": "8",
+            "sequenceReason": "the IP sequence: the SWPPV testbed orders same-day IPFX, IPFL, RR",
+            "techspec": "SWPPV schedule IP^(fix) l. 2130, functions l. 2211",
+            "testbeds": ["actus-tests-swppv.json"]
+        },
+        {
+            "acronym": "IPFL",
+            "identifier": "interestPaymentFloatingLeg",
+            "name": "Interest Payment Floating Leg",
+            "sequence": "8",
+            "sequenceReason": "the IP sequence: the SWPPV testbed orders same-day IPFX, IPFL, RR (IPFX is emitted first; the sort is stable)",
+            "techspec": "SWPPV schedule IP^(var) l. 2135, functions l. 2215",
+            "testbeds": ["actus-tests-swppv.json"]
+        }
+    ]
+}
