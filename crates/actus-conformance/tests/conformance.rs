@@ -339,19 +339,40 @@ fn gate(testbed: &str, cases: usize, events: usize, expected_passing: &[&str]) {
     );
 }
 
+/// Asserts a testbed's totals and that every one of its cases passes.
+fn gate_complete(testbed: &str, cases: usize, events: usize) {
+    let all: Vec<String> = cases::testbed(testbed)
+        .expect("testbed is listed")
+        .load()
+        .expect("testbed loads")
+        .into_iter()
+        .map(|case| case.identifier)
+        .collect();
+    let all: Vec<&str> = all.iter().map(String::as_str).collect();
+    gate(testbed, cases, events, &all);
+}
+
 #[test]
 fn stk_testbed_gate() {
-    gate("stk", 10, 78, &[]);
+    gate_complete("stk", 10, 78);
 }
 
 #[test]
 fn com_testbed_gate() {
-    gate("com", 4, 6, &[]);
+    gate_complete("com", 4, 6);
 }
 
 #[test]
 fn fxout_testbed_gate() {
-    gate("fxout", 12, 20, &["fxout06"]);
+    gate(
+        "fxout",
+        12,
+        20,
+        &[
+            "fxout01", "fxout02", "fxout03", "fxout04", "fxout05", "fxout06", "fxout07", "fxout08",
+            "fxout09", "fxout11", "fxout12",
+        ],
+    );
 }
 
 #[test]
@@ -361,17 +382,17 @@ fn swppv_testbed_gate() {
 
 #[test]
 fn capfl_testbed_gate() {
-    gate("capfl", 4, 16, &[]);
+    gate_complete("capfl", 4, 16);
 }
 
 #[test]
 fn optns_testbed_gate() {
-    gate("optns", 23, 86, &[]);
+    gate_complete("optns", 23, 86);
 }
 
 #[test]
 fn futur_testbed_gate() {
-    gate("futur", 14, 50, &[]);
+    gate_complete("futur", 14, 50);
 }
 
 #[test]
@@ -381,12 +402,16 @@ fn ceg_testbed_gate() {
 
 #[test]
 fn ump_testbed_gate() {
-    gate("ump", 9, 63, &["ump01"]);
+    gate_complete("ump", 9, 63);
 }
 
 #[test]
 fn lax_testbed_gate() {
-    gate("lax", 18, 269, &["lax01", "lax02", "lax03"]);
+    let passing = [
+        "lax01", "lax02", "lax03", "lax04", "lax05", "lax06", "lax07", "lax08", "lax09", "lax10",
+        "lax11", "lax12", "lax13", "lax14", "lax15",
+    ];
+    gate("lax", 18, 269, &passing);
 }
 
 #[test]

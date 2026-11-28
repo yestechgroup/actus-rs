@@ -183,7 +183,8 @@ pub const ENGINE_TYPES: [ContractType; 18] = [
     ContractType::Cec,
 ];
 
-const TESTBEDS: [(&str, &str); 8] = [
+/// Every vendored official testbed (`vendor/actus/tests`), by contract type.
+const TESTBEDS: [(&str, &str); 19] = [
     (
         "PAM",
         include_str!("../../../vendor/actus/tests/actus-tests-pam.json"),
@@ -215,6 +216,50 @@ const TESTBEDS: [(&str, &str); 8] = [
     (
         "CEC",
         include_str!("../../../vendor/actus/tests/actus-tests-cec.json"),
+    ),
+    (
+        "STK",
+        include_str!("../../../vendor/actus/tests/actus-tests-stk.json"),
+    ),
+    (
+        "COM",
+        include_str!("../../../vendor/actus/tests/actus-tests-com.json"),
+    ),
+    (
+        "FXOUT",
+        include_str!("../../../vendor/actus/tests/actus-tests-fxout.json"),
+    ),
+    (
+        "SWPPV",
+        include_str!("../../../vendor/actus/tests/actus-tests-swppv.json"),
+    ),
+    (
+        "CAPFL",
+        include_str!("../../../vendor/actus/tests/actus-tests-capfl.json"),
+    ),
+    (
+        "OPTNS",
+        include_str!("../../../vendor/actus/tests/actus-tests-optns.json"),
+    ),
+    (
+        "FUTUR",
+        include_str!("../../../vendor/actus/tests/actus-tests-futur.json"),
+    ),
+    (
+        "CEG",
+        include_str!("../../../vendor/actus/tests/actus-tests-ceg.json"),
+    ),
+    (
+        "UMP",
+        include_str!("../../../vendor/actus/tests/actus-tests-ump.json"),
+    ),
+    (
+        "LAX",
+        include_str!("../../../vendor/actus/tests/actus-tests-lax.json"),
+    ),
+    (
+        "ANN",
+        include_str!("../../../vendor/actus/tests/actus-tests-ad0.json"),
     ),
 ];
 
@@ -745,6 +790,20 @@ pub fn generate(data: &[u8]) -> Case {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every vendored testbed file seeds the generator.
+    #[test]
+    fn every_vendored_testbed_is_a_seed_source() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendor/actus/tests");
+        let files = std::fs::read_dir(dir)
+            .expect("vendored testbeds")
+            .filter(|e| {
+                e.as_ref()
+                    .is_ok_and(|e| e.path().extension().is_some_and(|x| x == "json"))
+            })
+            .count();
+        assert_eq!(TESTBEDS.len(), files);
+    }
 
     #[test]
     fn every_engine_type_has_a_seed() {

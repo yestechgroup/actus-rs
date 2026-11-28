@@ -51,7 +51,7 @@ use crate::common::rolls_before;
 use crate::common::{calculate_first, role_sign, stub_series};
 use crate::daycount::{day_count_fraction, normalize_timestamp};
 use crate::engine::ContractEngine;
-use crate::event::{sequence_rank, ContractEvent};
+use crate::event::{call_money_sequence_rank, ContractEvent};
 use crate::num::ck;
 use crate::risk::RiskFactorProvider;
 use crate::schedule::{cycle_step, shift_business_day};
@@ -102,17 +102,21 @@ impl Kind {
         }
     }
 
-    /// The effective same-timestamp sequence rank of the slot, through the
-    /// shared sequence rank (which places the call notice `XD` directly
-    /// before the final interest payment, see `event::sequence_rank`).
+    /// The effective same-timestamp sequence rank of the slot: the CLM rank,
+    /// which places the call notice `XD` directly before the final interest
+    /// payment (`event::call_money_sequence_rank`).
     fn priority(self) -> u8 {
-        sequence_rank(self.event_type())
+        call_money_sequence_rank(self.event_type())
     }
 }
 
 impl ContractEngine for ClmEngine {
     fn contract_type(&self) -> ContractType {
         ContractType::Clm
+    }
+
+    fn sequence_rank(&self, event_type: EventType) -> u8 {
+        call_money_sequence_rank(event_type)
     }
 
     fn evaluate(

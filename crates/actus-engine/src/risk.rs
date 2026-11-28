@@ -75,6 +75,15 @@ pub trait RiskFactorProvider {
     fn observed_credit_events(&self) -> Vec<ObservedCreditEvent> {
         Vec::new()
     }
+
+    /// The analysis horizon `tmax` (techspec "Contract lifetime", l. 382-384):
+    /// "a parameter that may be used to restrict the considered lifetime in
+    /// an analysis", in particular for contracts without a natural end,
+    /// such as STK. Engines bound open-ended schedules by it (the STK
+    /// dividends, `S(s, DVCL, tmax)`). The default environment sets none.
+    fn analysis_horizon(&self) -> Option<NaiveDateTime> {
+        None
+    }
 }
 
 /// A [`RiskFactorProvider`] built from a fixed map of observations.
@@ -89,6 +98,7 @@ pub struct StateProvider {
     indexes: BTreeMap<String, BTreeMap<NaiveDateTime, Decimal>>,
     events: Vec<ObservedEvent>,
     credit_events: Vec<ObservedCreditEvent>,
+    horizon: Option<NaiveDateTime>,
 }
 
 impl StateProvider {
@@ -137,6 +147,13 @@ impl StateProvider {
         self
     }
 
+    /// Sets the analysis horizon `tmax`
+    /// ([`RiskFactorProvider::analysis_horizon`]).
+    pub fn with_analysis_horizon(mut self, horizon: NaiveDateTime) -> Self {
+        self.horizon = Some(horizon);
+        self
+    }
+
     /// Step-function lookup: the latest observation at or before `at`.
     fn observe(
         series: &BTreeMap<String, BTreeMap<NaiveDateTime, Decimal>>,
@@ -163,6 +180,10 @@ impl RiskFactorProvider for StateProvider {
 
     fn observed_credit_events(&self) -> Vec<ObservedCreditEvent> {
         self.credit_events.clone()
+    }
+
+    fn analysis_horizon(&self) -> Option<NaiveDateTime> {
+        self.horizon
     }
 }
 
@@ -191,6 +212,14 @@ mod tests {
         assert_eq!(Nothing.index("ANY", at), None);
         assert!(Nothing.observed_events().is_empty());
         assert!(Nothing.observed_credit_events().is_empty());
+        assert_eq!(Nothing.analysis_horizon(), None);
+    }
+
+    #[test]
+    fn state_provider_carries_the_analysis_horizon() {
+        assert_eq!(StateProvider::new().analysis_horizon(), None);
+        let provider = StateProvider::new().with_analysis_horizon(t(2018, 1, 1));
+        assert_eq!(provider.analysis_horizon(), Some(t(2018, 1, 1)));
     }
 
     #[test]

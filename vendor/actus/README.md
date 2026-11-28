@@ -100,6 +100,17 @@ in-Rust oracle only (`crates/actus-conformance/src/oracle.rs`, `tests/differenti
    interest). The techspec defines all three. `actus-model` adds them through
    its generator from `crates/actus-model/extensions/event-types.json`
    (`docs/spec-interpretations.md`, SI-005).
+9. The STK testbed spells the dividend schedule attributes
+   **`cycleAnchorDateOfDividendPayment`** and **`cycleOfDividendPayment`**
+   (dictionary: `cycleAnchorDateOfDividend`, `cycleOfDividend`), and names
+   the observed dividend series with **`marketObjectCodeOfDividends`**, which
+   the dictionary lacks. `actus-model` accepts both spellings and carries the
+   extra attribute, as it does `fixingDays`. A model test checks that no
+   testbed key is dropped silently.
+10. The dictionary types `settlementPeriod` as a Period (`P5D`), but the
+    FXOUT and CEG testbeds also write it in **cycle notation with a stub
+    suffix**: `P1DL0` (5 cases), `P5DL0` (2 cases). A stub means nothing for
+    a single period; the engine accepts and ignores the suffix.
 
 ## Purpose
 

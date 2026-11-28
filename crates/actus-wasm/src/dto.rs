@@ -169,6 +169,11 @@ pub struct Scenario {
     /// enhancement contract types (`CEC`).
     #[serde(default)]
     pub credit_events: Vec<WireCreditEvent>,
+    /// The analysis horizon `tmax`, `YYYY-MM-DDTHH:MM:SS` (a bare date is
+    /// accepted): bounds open-ended schedules such as the dividends of a
+    /// stock without a termination date.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analysis_horizon: Option<String>,
 }
 
 /// One externally observed event of a [`Scenario`].
@@ -221,6 +226,7 @@ pub struct ScenarioProvider {
     unit_prices: BTreeMap<String, BTreeMap<NaiveDateTime, Decimal>>,
     observed_events: Vec<ObservedEvent>,
     credit_events: Vec<ObservedCreditEvent>,
+    analysis_horizon: Option<NaiveDateTime>,
 }
 
 impl ScenarioProvider {
@@ -282,12 +288,19 @@ impl ScenarioProvider {
                 performance,
             });
         }
+        let analysis_horizon = scenario
+            .analysis_horizon
+            .as_deref()
+            .map(parse_scenario_timestamp)
+            .transpose()
+            .map_err(|e| format!("analysisHorizon: {e}"))?;
         Ok(Self {
             rates,
             fx_rates,
             unit_prices,
             observed_events,
             credit_events,
+            analysis_horizon,
         })
     }
 
@@ -319,6 +332,10 @@ impl RiskFactorProvider for ScenarioProvider {
 
     fn observed_credit_events(&self) -> Vec<ObservedCreditEvent> {
         self.credit_events.clone()
+    }
+
+    fn analysis_horizon(&self) -> Option<NaiveDateTime> {
+        self.analysis_horizon
     }
 }
 
@@ -764,5 +781,28 @@ mod tests {
         )
         .expect_err("unknown performance rejected");
         assert!(err.contains("unknown performance"), "{err}");
+        let err = evaluate_json_with_risk(terms, r#"{"analysisHorizon": "soon"}"#)
+            .expect_err("invalid horizon rejected");
+        assert!(err.contains("analysisHorizon"), "{err}");
+    }
+
+    /// The scenario's `analysisHorizon` is the `tmax` that bounds an open
+    /// STK dividend schedule (techspec `S(DVANX, DVCL, tmax)`).
+    #[test]
+    fn scenario_analysis_horizon_bounds_open_dividends() {
+        let terms = r#"{"contractType": "STK", "contractID": "acme", "contractRole": "RPA",
+            "statusDate": "2016-01-01T00:00:00", "currency": "USD",
+            "cycleAnchorDateOfDividend": "2016-02-15T00:00:00", "cycleOfDividend": "P3ML1"}"#;
+        let scenario = r#"{"rates": {"acme-DV": {"2016-02-15": "1.5"}},
+            "analysisHorizon": "2017-02-15"}"#;
+        let result = evaluate_json_with_risk(terms, scenario).expect("bounded by the horizon");
+        let value: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(value["events"].as_array().unwrap().len(), 5);
+        assert!(
+            evaluate_json_with_risk(terms, r#"{"rates": {"acme-DV": {"2016-02-15": "1.5"}}}"#)
+                .is_err()
+        );
+        let parsed: Scenario = serde_json::from_str(scenario).unwrap();
+        assert_eq!(parsed.analysis_horizon.as_deref(), Some("2017-02-15"));
     }
 }

@@ -71,12 +71,37 @@ Everything since the crates were imported from `onboarding-os`.
   contract, a contract identifier (`CID`) or a market object code (`MOC`),
   chosen by `referenceType`. Use `embedded_contract()`,
   `contract_identifier()` and `market_object_code()`.
+- `RiskFactorProvider::analysis_horizon()` (default none), the techspec
+  `tmax`; the wasm scenario gains `analysisHorizon`. Open-ended schedules
+  (STK dividends, UMP interest) without a termination or a horizon are an
+  error instead of being silently cut.
+- `ContractEngine::sequence_rank` lets an engine order same-day events
+  differently; only CLM moves `XD` before `IP`.
 - `ContractTerms::array_fixed_variable` is an `Option<Vec<ArrayFixVar>>`,
   as the dictionary's `Enum[]` type requires (#44). RUSTSEC-2026-0543 (chrono
   unmaintained) is ignored with a reason in `deny.toml`; see #32.
 
 ### Fixed
 
+- The hand-tested types against their official testbeds (SI-006 to
+  SI-009):
+  - STK and COM: `quantity` defaults to 1, no notional state, an optional
+    purchase, and dividends observed on `S(DVANX, DVCL, tmax)`.
+  - FXOUT: no notional state, gross settlement by default (`DS = D`), and
+    a net `STD` after the settlement period for `DS = S`.
+  - OPTNS and FUTUR: the techspec exercise stream (`PRD`, `MD`, `XD`,
+    `STD`) on the `contractStructure` underlying; the call/put uses
+    `optionStrike2`.
+  - UMP: scheduled interest capitalizes (`IPCI`) up to `Md`, the analysis
+    horizon.
+  - LAX: the maturity inferred from the principal arrays, array anchors
+    without cycles, and per-segment fixed/variable rate resets with `RRF`
+    (#44).
+  - CAPFL: no terminal `MD` and no underlying state.
+  - `nominalInterestRate2` (IPNR2) is modelled; the STK testbed's dividend
+    attribute spellings are read; settlement periods accept the cycle
+    notation `P5DL0`.
+  - `DeliverySettlement` docs: `S` is cash, `D` is physical.
 - Terms the official testbeds use and the model rejected: the calendar
   spelling `NOCALENDAR`, one-element array attributes written as bare
   scalars, `arrayFixedVariable` arrays (#44), and `contractStructure`

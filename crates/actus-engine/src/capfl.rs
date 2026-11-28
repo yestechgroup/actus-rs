@@ -29,9 +29,11 @@
 //! receives `R(CNTRL) x |IP_uncapped - IP_capped|` — the absolute difference
 //! of the two runs' interest payments (paper §7.14 "takes the absolute
 //! difference"). Non-`IP` flows (principal exchanges, resets) are identical
-//! in both runs and contribute nothing. Unbreached periods pay zero; a
-//! zero-payoff terminal `MD` closes the stream at the underlying maturity.
-//! Post-event states report the *uncapped* run's snapshots.
+//! in both runs and contribute nothing. Unbreached periods pay zero. There
+//! is no `MD` event: the techspec CAPFL schedule holds only the merged `IP`
+//! events (capfl01-04), the last of which reports the matured status.
+//! CAPFL has no notional or rate state of its own (techspec CAPFL states:
+//! `Md`, `Ipac`, `Prf`, `Sd`), so post-event states carry neither.
 
 use rust_decimal::Decimal;
 
@@ -122,23 +124,25 @@ impl ContractEngine for CapflEngine {
                         .abs())
                 .get()?,
                 currency: terms.currency.clone(),
-                state: uncapped_event.state.clone(),
+                // CAPFL carries no notional or rate of its own (techspec
+                // CAPFL states: Md, Ipac, Prf, Sd), and its accrual is zero
+                // right after a merged IP.
+                state: ContractState {
+                    status_date: uncapped_event.time,
+                    ..ContractState::default()
+                },
             });
         }
-        let terminal = last_time.ok_or(EngineError::InvalidTransition(
-            "the CAPFL underlying produced no events".to_string(),
-        ))?;
-        events.push(ContractEvent {
-            event_type: EventType::Maturity,
-            time: terminal,
-            payoff: Decimal::ZERO,
-            currency: terms.currency.clone(),
-            state: ContractState {
-                status_date: terminal,
-                contract_status: ContractStatus::Matured,
-                ..ContractState::default()
-            },
-        });
+        if last_time.is_none() {
+            return Err(EngineError::InvalidTransition(
+                "the CAPFL underlying produced no events".to_string(),
+            ));
+        }
+        // No MD: the techspec CAPFL schedule holds only the merged IP events
+        // (capfl01-04). The last one ends the contract.
+        if let Some(last) = events.last_mut() {
+            last.state.contract_status = ContractStatus::Matured;
+        }
         Ok(events)
     }
 }
@@ -278,6 +282,10 @@ impl RiskFactorProvider for ClampedRiskProvider<'_> {
     fn observed_credit_events(&self) -> Vec<ObservedCreditEvent> {
         self.inner.observed_credit_events()
     }
+
+    fn analysis_horizon(&self) -> Option<chrono::NaiveDateTime> {
+        self.inner.analysis_horizon()
+    }
 }
 
 #[cfg(test)]
@@ -352,11 +360,11 @@ mod tests {
                 (t("2026-01-01T00:00:00"), Decimal::ZERO),
             ]
         );
-        let md = events.last().expect("MD");
-        assert_eq!(md.event_type, EventType::Maturity);
-        assert_eq!(md.payoff, Decimal::ZERO);
-        assert_eq!(md.state.contract_status, ContractStatus::Matured);
-        assert_eq!(events.len(), 6);
+        // No MD (techspec CAPFL schedule): the last merged IP matures it.
+        let last = events.last().expect("IP");
+        assert_eq!(last.event_type, EventType::InterestPayment);
+        assert_eq!(last.state.contract_status, ContractStatus::Matured);
+        assert_eq!(events.len(), 5);
     }
 
     #[test]
@@ -490,5 +498,74 @@ mod tests {
             error,
             EngineError::MissingAttribute("initialExchangeDate")
         ));
+    }
+
+    /// The CAPFL testbed's capfl01: a bought 7 % cap on a quarterly
+    /// floating PAM observing LIBORUSD1M.
+    fn capfl01() -> (ContractTerms, StateProvider) {
+        let terms: ContractTerms = serde_json::from_value(serde_json::json!({
+            "contractType": "CAPFL",
+            "contractID": "capfl01",
+            "contractRole": "BUY",
+            "contractStructure": [{
+                "object": {
+                    "contractType": "PAM",
+                    "contractID": "capfl-underlying",
+                    "contractDealDate": "2012-12-28T00:00:00",
+                    "initialExchangeDate": "2013-01-01T00:00:00",
+                    "currency": "USD",
+                    "statusDate": "2012-12-30T00:00:00",
+                    "notionalPrincipal": "1000",
+                    "dayCountConvention": "A365",
+                    "nominalInterestRate": "0.05",
+                    "maturityDate": "2014-01-01T00:00:00",
+                    "cycleAnchorDateOfInterestPayment": "2013-04-01T00:00:00",
+                    "cycleOfInterestPayment": "P3ML1",
+                    "cycleAnchorDateOfRateReset": "2013-04-01T00:00:00",
+                    "cycleOfRateReset": "P3ML1",
+                    "marketObjectCodeOfRateReset": "LIBORUSD1M"
+                },
+                "referenceType": "CNT",
+                "referenceRole": "UDL"
+            }],
+            "currency": "USD",
+            "contractDealDate": "2012-12-28T00:00:00",
+            "statusDate": "2012-12-30T00:00:00",
+            "lifeCap": "0.07"
+        }))
+        .expect("capfl01 terms");
+        let risk = StateProvider::new()
+            .with_rate("LIBORUSD1M", t("2013-04-01T00:00:00"), dec!(0.1))
+            .with_rate("LIBORUSD1M", t("2013-07-01T00:00:00"), dec!(0.01))
+            .with_rate("LIBORUSD1M", t("2013-10-01T00:00:00"), dec!(0.04));
+        (terms, risk)
+    }
+
+    /// capfl01: CAPFL has no notional or rate state of its own (techspec
+    /// CAPFL states: `Md`, `Ipac`, `Prf`, `Sd`); the testbed reports
+    /// `notionalPrincipal` and `nominalInterestRate` 0 after every event.
+    #[test]
+    fn capfl01_reports_no_underlying_state() {
+        let (terms, risk) = capfl01();
+        let events = CapflEngine
+            .evaluate(&terms, &risk)
+            .expect("capfl01 evaluates");
+        assert!(events.iter().all(|e| e.state.notional_principal.is_zero()
+            && e.state.nominal_interest_rate.is_zero()
+            && e.state.accrued_interest.is_zero()));
+    }
+
+    /// capfl01: the CAPFL schedule holds only the merged `IP` events (and
+    /// `AD`/`PRD`/`TD`/`CE`), no `MD` (techspec CAPFL schedule): four
+    /// quarterly differences, `0, 7.479..., 0, 0` for the bought 7 % cap.
+    #[test]
+    fn capfl01_has_no_maturity_event() {
+        let (terms, risk) = capfl01();
+        let events = CapflEngine
+            .evaluate(&terms, &risk)
+            .expect("capfl01 evaluates");
+        let types: Vec<EventType> = events.iter().map(|e| e.event_type).collect();
+        assert_eq!(types, vec![EventType::InterestPayment; 4]);
+        assert_eq!(events[1].payoff.round_dp(9), dec!(7.479452055));
     }
 }

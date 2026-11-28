@@ -60,7 +60,7 @@ use crate::fixed_income::{
 };
 use crate::num::ck;
 use crate::risk::RiskFactorProvider;
-use crate::schedule::{array_series, cycle_step};
+use crate::schedule::{array_series, cycle_step, MAX_SCHEDULE_ROLLS};
 use crate::state::{ContractState, ContractStatus};
 use crate::EngineError;
 
@@ -128,7 +128,10 @@ enum Kind {
     InterestCapitalization,
     InterestCalculationBaseFixing,
     RateReset,
+    /// An array rate reset of a variable segment (`ARFIXVAR_i = V`): `RR`.
     ArrayRateReset,
+    /// An array rate reset of a fixed segment (`ARFIXVAR_i = F`): `RRF`.
+    ArrayRateResetFixed,
     RateResetFixed,
     ScalingIndexFixing,
     Purchase,
@@ -147,7 +150,7 @@ impl Kind {
             Kind::InterestCapitalization => EventType::InterestCapitalization,
             Kind::InterestCalculationBaseFixing => EventType::InterestCalculationBaseFixing,
             Kind::RateReset | Kind::ArrayRateReset => EventType::RateResetVariable,
-            Kind::RateResetFixed => EventType::RateResetFixed,
+            Kind::RateResetFixed | Kind::ArrayRateResetFixed => EventType::RateResetFixed,
             Kind::ScalingIndexFixing => EventType::ScalingIndexFixing,
             Kind::Purchase => EventType::Purchase,
             Kind::Termination => EventType::Termination,
@@ -258,8 +261,10 @@ impl Context {
                 }),
             terms.array_cycle_of_principal_redemption.as_ref(),
         ) {
-            (Some(anchors), Some(cycles)) if !anchors.is_empty() && !cycles.is_empty() => {
-                Some((anchors, cycles.clone()))
+            // Cycles are optional: without them each anchor is a schedule
+            // element of its own (techspec LAX schedule, `s_i = {ARPRANX_i}`).
+            (Some(anchors), cycles) if !anchors.is_empty() => {
+                Some((anchors, cycles.cloned().unwrap_or_default()))
             }
             _ => None,
         };
@@ -277,6 +282,15 @@ impl Context {
         }
         let maturity = match terms.maturity_date.map(normalize_timestamp) {
             Some(maturity) => maturity,
+            None if principal_array.is_some() => {
+                let (anchors, cycles) =
+                    principal_array
+                        .as_ref()
+                        .ok_or(EngineError::MissingAttribute(
+                            "arrayCycleAnchorDateOfPrincipalRedemption",
+                        ))?;
+                array_maturity(terms, notional, anchors, cycles, eomc)?
+            }
             None => {
                 let prnxt = terms.next_principal_redemption_payment.ok_or(
                     EngineError::MissingAttribute("nextPrincipalRedemptionPayment"),
@@ -342,8 +356,10 @@ impl Context {
                 }),
             terms.array_cycle_of_interest_payment.as_ref(),
         ) {
-            (Some(anchors), Some(cycles)) if !anchors.is_empty() && !cycles.is_empty() => {
-                Some((anchors, cycles.clone()))
+            // Cycles are optional: without them each anchor is a schedule
+            // element of its own (techspec LAX schedule, `s_i = {ARPRANX_i}`).
+            (Some(anchors), cycles) if !anchors.is_empty() => {
+                Some((anchors, cycles.cloned().unwrap_or_default()))
             }
             _ => None,
         };
@@ -359,8 +375,10 @@ impl Context {
                 }),
             terms.array_cycle_of_rate_reset.as_ref(),
         ) {
-            (Some(anchors), Some(cycles)) if !anchors.is_empty() && !cycles.is_empty() => {
-                Some((anchors, cycles.clone()))
+            // Cycles are optional: without them each anchor is a schedule
+            // element of its own (techspec LAX schedule, `s_i = {ARPRANX_i}`).
+            (Some(anchors), cycles) if !anchors.is_empty() => {
+                Some((anchors, cycles.cloned().unwrap_or_default()))
             }
             _ => None,
         };
@@ -589,12 +607,13 @@ impl Context {
                 if calc > self.maturity {
                     continue;
                 }
-                slots.push(Slot::in_segment(
-                    Kind::ArrayRateReset,
-                    calc,
-                    emit,
-                    Self::segment_of(anchors, unshifted),
-                ));
+                let segment = Self::segment_of(anchors, unshifted);
+                let kind = if self.segment_is_variable(terms, segment) {
+                    Kind::ArrayRateReset
+                } else {
+                    Kind::ArrayRateResetFixed
+                };
+                slots.push(Slot::in_segment(kind, calc, emit, segment));
             }
             return Ok(());
         }
@@ -656,6 +675,18 @@ impl Context {
             }
             _ => false,
         }
+    }
+
+    /// Whether rate segment `segment` is variable (`ARFIXVAR_i = V`; the
+    /// element is clamped to the last one, and an absent array reads as
+    /// `F`). The techspec LAX schedule gives the `V` segments `RR` and the
+    /// `F` segments `RRF` events (#44).
+    fn segment_is_variable(&self, terms: &ContractTerms, segment: usize) -> bool {
+        terms
+            .array_fixed_variable
+            .as_deref()
+            .and_then(|segments| segments.get(segment).or_else(|| segments.last()))
+            .is_some_and(|fv| *fv == ArrayFixVar::Variable)
     }
 
     /// The `ARRATE` value of one segment, clamped to the last element.
@@ -754,44 +785,35 @@ impl Context {
                 Decimal::ZERO
             }
             Kind::ArrayRateReset => {
+                // A variable segment: the segment rate is the spread on top
+                // of the observed reference rate (the applicable `RRSP`).
                 state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
-                // Phase-1 reading of the array: its first element applies to
-                // every segment, as the scalar did before #44 (per-segment
-                // selection follows with the LAX testbed).
-                match terms
-                    .array_fixed_variable
-                    .as_ref()
-                    .and_then(|v| v.first().copied())
-                {
-                    Some(ArrayFixVar::Variable) => {
-                        // The segment rate is the spread on top of the
-                        // reference rate (the applicable `RRSP`).
-                        let code = terms
-                            .market_object_code_of_rate_reset
-                            .as_deref()
-                            .ok_or(EngineError::MissingAttribute("marketObjectCodeOfRateReset"))?;
-                        let observed =
-                            risk.rate(code, slot.calc)
-                                .ok_or(EngineError::RiskFactorMissing {
-                                    code: code.to_string(),
-                                    at: slot.calc.to_string(),
-                                })?;
-                        let multiplier = terms.rate_multiplier.unwrap_or(Decimal::ONE);
-                        let spread = self
-                            .array_rate(terms, slot.segment)
-                            .unwrap_or(terms.rate_spread.unwrap_or(Decimal::ZERO));
-                        state.nominal_interest_rate = (ck(observed) * multiplier + spread).get()?;
-                    }
-                    // `F` and the attribute default: the segment rate is the
-                    // new fixed nominal interest rate.
-                    _ => {
-                        let rate = self
-                            .array_rate(terms, slot.segment)
-                            .or(terms.next_reset_rate)
-                            .ok_or(EngineError::MissingAttribute("arrayRate"))?;
-                        state.nominal_interest_rate = rate;
-                    }
-                }
+                let code = terms
+                    .market_object_code_of_rate_reset
+                    .as_deref()
+                    .ok_or(EngineError::MissingAttribute("marketObjectCodeOfRateReset"))?;
+                let observed =
+                    risk.rate(code, slot.calc)
+                        .ok_or(EngineError::RiskFactorMissing {
+                            code: code.to_string(),
+                            at: slot.calc.to_string(),
+                        })?;
+                let multiplier = terms.rate_multiplier.unwrap_or(Decimal::ONE);
+                let spread = self
+                    .array_rate(terms, slot.segment)
+                    .unwrap_or(terms.rate_spread.unwrap_or(Decimal::ZERO));
+                state.nominal_interest_rate = (ck(observed) * multiplier + spread).get()?;
+                Decimal::ZERO
+            }
+            Kind::ArrayRateResetFixed => {
+                // A fixed segment: the segment rate is the new fixed nominal
+                // interest rate.
+                state.accrued_interest = (ck(state.accrued_interest) + accrual).get()?;
+                let rate = self
+                    .array_rate(terms, slot.segment)
+                    .or(terms.next_reset_rate)
+                    .ok_or(EngineError::MissingAttribute("arrayRate"))?;
+                state.nominal_interest_rate = rate;
                 Decimal::ZERO
             }
             Kind::RateReset => {
@@ -929,6 +951,90 @@ fn progressed_initial(ctx: &Context, terms: &ContractTerms) -> Result<ContractSt
         },
     };
     Ok(state)
+}
+
+/// The maturity of an array-scheduled LAX without `maturityDate` (techspec
+/// LAX states, `Md`): the first schedule date `t` at which
+/// `N(t) = NT + sum_i (-1)^k ARPRNXT_i |s_i(t)|` reaches zero, where `s_i`
+/// is segment `i` of the principal schedule up to `t` and `k` is 0 for an
+/// `INC` and 1 for a `DEC` segment. Segment `i` rolls from `ARPRANX_i` by
+/// its cycle up to `ARPRANX_{i+1}`; the last segment rolls on until the
+/// notional is redeemed. A segment amount or direction past the end of its
+/// array takes the last element, as the schedule does.
+///
+/// # Errors
+/// [`EngineError::InvalidSchedule`] when the schedule never redeems the
+/// notional within `MAX_SCHEDULE_ROLLS` elements;
+/// [`EngineError::MissingAttribute`] without `ARPRNXT`.
+fn array_maturity(
+    terms: &ContractTerms,
+    notional: Decimal,
+    anchors: &[NaiveDateTime],
+    cycles: &[Cycle],
+    eomc: EndOfMonthConvention,
+) -> Result<NaiveDateTime, EngineError> {
+    let element = |values: &[Decimal], i: usize| {
+        values
+            .get(i)
+            .or_else(|| values.last())
+            .copied()
+            .ok_or(EngineError::MissingAttribute(
+                "arrayNextPrincipalRedemptionPayment",
+            ))
+    };
+    let payments = terms
+        .array_next_principal_redemption_payment
+        .as_deref()
+        .ok_or(EngineError::MissingAttribute(
+            "arrayNextPrincipalRedemptionPayment",
+        ))?;
+    let increases = |i: usize| {
+        terms
+            .array_increase_decrease
+            .as_deref()
+            .and_then(|d| d.get(i).or_else(|| d.last()))
+            .is_some_and(|d| *d == ArrayIncDec::Inc)
+    };
+    let mut outstanding = notional.abs();
+    let mut rolls: u64 = 0;
+    for (i, anchor) in anchors.iter().enumerate() {
+        let amount = element(payments, i)?.abs();
+        let next_anchor = anchors.get(i.saturating_add(1)).copied();
+        let cycle = cycles.get(i).or_else(|| cycles.last());
+        let mut index: u64 = 0;
+        loop {
+            let time = match cycle {
+                Some(cycle) if index > 0 => cycle_step(*anchor, index, cycle, eomc)?,
+                _ => *anchor,
+            };
+            if next_anchor.is_some_and(|next| time >= next) {
+                break;
+            }
+            outstanding = if increases(i) {
+                (ck(outstanding) + amount).get()?
+            } else {
+                (ck(outstanding) - amount).get()?
+            };
+            if outstanding <= Decimal::ZERO {
+                return Ok(normalize_timestamp(time));
+            }
+            rolls = rolls.saturating_add(1);
+            if rolls > MAX_SCHEDULE_ROLLS {
+                return Err(EngineError::InvalidSchedule(format!(
+                    "the principal redemption arrays do not redeem the notional within \
+                     {MAX_SCHEDULE_ROLLS} schedule elements"
+                )));
+            }
+            // A segment without a cycle is the single date ARPRANX_i.
+            if cycle.is_none() {
+                break;
+            }
+            index = index.saturating_add(1);
+        }
+    }
+    Err(EngineError::InvalidSchedule(
+        "the principal redemption arrays do not redeem the notional".to_string(),
+    ))
 }
 
 #[cfg(test)]
@@ -1206,6 +1312,7 @@ mod tests {
     /// before the 2026-07-01 anchor) resets at 0.05 on 2026-01-01, 03-01,
     /// 05-01, segment 1 resets at 0.09 on 2026-07-01 (the maturity element
     /// of the schedule belongs to `MD`).
+    /// The `F` segments report fixed resets, `RRF` (#44).
     #[test]
     fn array_rate_reset_applies_the_segment_rate() {
         let terms = terms(json!({
@@ -1234,7 +1341,7 @@ mod tests {
             .expect("events");
         let resets: Vec<&ContractEvent> = events
             .iter()
-            .filter(|e| e.event_type == EventType::RateResetVariable)
+            .filter(|e| e.event_type == EventType::RateResetFixed)
             .collect();
         assert_eq!(resets.len(), 4);
         assert_eq!(resets[0].time, t("2026-01-01T00:00:00"));
@@ -1404,5 +1511,137 @@ mod tests {
             LaxEngine.evaluate(&no_ied, &StateProvider::new()),
             Err(EngineError::MissingAttribute("initialExchangeDate"))
         ));
+    }
+
+    /// The LAX testbed's lax04 shape: 100 redeemed by 20 a year from 2021,
+    /// every array written as a bare scalar, no `maturityDate`.
+    fn lax04() -> ContractTerms {
+        terms(json!({
+            "contractType": "LAX",
+            "contractID": "lax04",
+            "statusDate": "2020-01-01T00:00:00",
+            "contractRole": "RPA",
+            "calendar": "NC",
+            "businessDayConvention": "SCF",
+            "endOfMonthConvention": "SD",
+            "currency": "EUR",
+            "contractDealDate": "2020-01-01T00:00:00",
+            "initialExchangeDate": "2020-01-02T00:00:00",
+            "notionalPrincipal": "100",
+            "arrayCycleAnchorDateOfInterestPayment": "2021-01-01T00:00:00",
+            "arrayCycleOfInterestPayment": "P1YL1",
+            "nominalInterestRate": "0.05",
+            "dayCountConvention": "30E360",
+            "arrayCycleAnchorDateOfPrincipalRedemption": "2021-01-01T00:00:00",
+            "arrayCycleOfPrincipalRedemption": "P1YL1",
+            "arrayNextPrincipalRedemptionPayment": 20,
+            "arrayIncreaseDecrease": "DEC"
+        }))
+    }
+
+    /// lax04: without `MD` the maturity is the first date the array
+    /// schedule redeems the notional to zero (techspec LAX states, `Md`):
+    /// the fifth yearly redemption of 20, 2025-01-01, where the `MD` event
+    /// repays the last 20.
+    #[test]
+    fn lax04_maturity_follows_from_the_array_schedule() {
+        let events = LaxEngine
+            .evaluate(&lax04(), &StateProvider::new())
+            .expect("lax04 evaluates");
+        let last = events.last().expect("events");
+        assert_eq!(last.event_type, EventType::Maturity);
+        assert_eq!(last.time, t("2025-01-01T00:00:00"));
+        assert_eq!(last.payoff, dec!(20));
+        let redemptions = events
+            .iter()
+            .filter(|e| e.event_type == EventType::PrincipalRedemption)
+            .count();
+        assert_eq!(redemptions, 4);
+    }
+
+    /// lax12: arrays of anchors without cycles schedule each anchor once
+    /// (techspec LAX schedule: `s_i = {ARPRANX_i}` when `ARPRCL` is
+    /// undefined; the `IP` array likewise): five yearly redemptions of 20,
+    /// the last as `MD`, and interest on the five anchor dates.
+    #[test]
+    fn lax12_anchor_arrays_without_cycles_schedule_each_anchor() {
+        let anchors = json!([
+            "2021-01-01T00:00:00",
+            "2022-01-01T00:00:00",
+            "2023-01-01T00:00:00",
+            "2024-01-01T00:00:00",
+            "2025-01-01T00:00:00"
+        ]);
+        let mut raw = serde_json::to_value(lax04()).expect("wire");
+        let bag = raw.as_object_mut().expect("bag");
+        bag.remove("arrayCycleOfInterestPayment");
+        bag.remove("arrayCycleOfPrincipalRedemption");
+        bag.insert(
+            "arrayCycleAnchorDateOfInterestPayment".into(),
+            anchors.clone(),
+        );
+        bag.insert("arrayCycleAnchorDateOfPrincipalRedemption".into(), anchors);
+        bag.insert(
+            "arrayNextPrincipalRedemptionPayment".into(),
+            json!([20, 20, 20, 20, 20]),
+        );
+        bag.insert(
+            "arrayIncreaseDecrease".into(),
+            json!(["DEC", "DEC", "DEC", "DEC", "DEC"]),
+        );
+        let events = LaxEngine
+            .evaluate(&terms(raw), &StateProvider::new())
+            .expect("lax12 evaluates");
+        let count = |event_type| events.iter().filter(|e| e.event_type == event_type).count();
+        assert_eq!(count(EventType::PrincipalRedemption), 4);
+        assert_eq!(count(EventType::InterestPayment), 5);
+        let last = events.last().expect("events");
+        assert_eq!(
+            (last.event_type, last.time),
+            (EventType::Maturity, t("2025-01-01T00:00:00"))
+        );
+        assert_eq!(last.payoff, dec!(20));
+    }
+
+    /// #44, lax17/lax18: `ARFIXVAR` selects per segment (techspec LAX
+    /// schedule: `RRF` for the segments with `ARFIXVAR_i = 'F'`, `RR` for
+    /// `'V'`). An `F` segment sets the rate to `ARRATE_i` (`RRF`); a `V`
+    /// segment observes the market and adds `ARRATE_i` as the spread (`RR`).
+    #[test]
+    fn fixed_and_variable_array_segments_reset_differently() {
+        let terms = array_rate_contract(json!({
+            "arrayFixedVariable": ["F", "V"],
+            "arrayRate": ["0.05", "0.01"],
+            "marketObjectCodeOfRateReset": "R"
+        }));
+        let risk = StateProvider::new().with_rate("R", t("2026-07-01T00:00:00"), dec!(0.04));
+        let events = LaxEngine.evaluate(&terms, &risk).expect("events");
+        let resets: Vec<(EventType, NaiveDateTime, Decimal)> = events
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.event_type,
+                    EventType::RateResetFixed | EventType::RateResetVariable
+                )
+            })
+            .map(|e| (e.event_type, e.time, e.state.nominal_interest_rate))
+            .collect();
+        assert_eq!(
+            resets[0],
+            (
+                EventType::RateResetFixed,
+                t("2026-01-01T00:00:00"),
+                dec!(0.05)
+            )
+        );
+        assert_eq!(
+            resets[3],
+            (
+                EventType::RateResetVariable,
+                t("2026-07-01T00:00:00"),
+                dec!(0.05)
+            )
+        );
+        assert_eq!(resets.len(), 4);
     }
 }

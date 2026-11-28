@@ -21,8 +21,9 @@ use serde::{Deserialize, Serialize};
 
 /// ACTUS contract terms for the fixed-income family.
 ///
-/// Field docs map each attribute to its dictionary acronym; `fixingDays` is
-/// carried by the testbeds but missing from dictionary v1.4 (see the crate
+/// Field docs map each attribute to its dictionary acronym; `fixingDays` and
+/// `marketObjectCodeOfDividends` are carried by the testbeds but missing
+/// from dictionary v1.4 (see the crate
 /// documentation for the full gap list).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContractTerms {
@@ -517,17 +518,22 @@ pub struct ContractTerms {
         skip_serializing_if = "Option::is_none"
     )]
     pub cycle_of_fee: Option<Cycle>,
-    /// ACTUS attribute `DVANX` — Cycle Anchor Date Of Dividend.
+    /// ACTUS attribute `DVANX` — Cycle Anchor Date Of Dividend. The STK
+    /// testbed spells it `cycleAnchorDateOfDividendPayment`, which also
+    /// deserializes (`vendor/actus/README.md`, known quirks).
     #[serde(
         rename = "cycleAnchorDateOfDividend",
+        alias = "cycleAnchorDateOfDividendPayment",
         default,
         deserialize_with = "timestamp_option::deserialize",
         skip_serializing_if = "Option::is_none"
     )]
     pub cycle_anchor_date_of_dividend: Option<NaiveDateTime>,
-    /// ACTUS attribute `DVCL` — Cycle Of Dividend.
+    /// ACTUS attribute `DVCL` — Cycle Of Dividend. The STK testbed spells it
+    /// `cycleOfDividendPayment`, which also deserializes.
     #[serde(
         rename = "cycleOfDividend",
+        alias = "cycleOfDividendPayment",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -548,6 +554,17 @@ pub struct ContractTerms {
         skip_serializing_if = "Option::is_none"
     )]
     pub next_dividend_payment_amount: Option<Decimal>,
+    /// Market object code of the observed dividend series of a stock
+    /// (`marketObjectCodeOfDividends`). Carried by the STK testbed but absent
+    /// from dictionary v1.4, like `fixingDays`; the techspec `POF_DV_STK`
+    /// observes the series `concat(CID, "-DV")` instead (SI-006).
+    #[serde(
+        rename = "marketObjectCodeOfDividends",
+        default,
+        deserialize_with = "crate::serde_helpers::string_option::deserialize",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub market_object_code_of_dividends: Option<String>,
     /// ACTUS attribute `QT` — Quantity.
     #[serde(
         rename = "quantity",
@@ -588,6 +605,16 @@ pub struct ContractTerms {
         skip_serializing_if = "Option::is_none"
     )]
     pub notional_principal2: Option<Decimal>,
+    /// ACTUS attribute `IPNR2` — Nominal Interest Rate 2: the rate of the
+    /// second (floating) leg of a plain vanilla swap at `IED` (techspec
+    /// SWPPV states, `Ipnr(t0) = IPNR2`).
+    #[serde(
+        rename = "nominalInterestRate2",
+        default,
+        deserialize_with = "decimal_option::deserialize",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub nominal_interest_rate2: Option<Decimal>,
     /// ACTUS attribute `XD` — Exercise Date.
     #[serde(
         rename = "exerciseDate",
@@ -1109,11 +1136,13 @@ impl ContractTerms {
             cycle_of_dividend: None,
             ex_dividend_date: None,
             next_dividend_payment_amount: None,
+            market_object_code_of_dividends: None,
             quantity: None,
             unit: None,
             market_value_observed: None,
             currency2: None,
             notional_principal2: None,
+            nominal_interest_rate2: None,
             exercise_date: None,
             exercise_amount: None,
             purchase_date: None,
@@ -1157,7 +1186,7 @@ impl ContractTerms {
     /// Builders use this against the generated applicability tables to enforce
     /// required and applicable sets.
     #[must_use]
-    pub fn presence(&self) -> [(&'static str, bool); 106] {
+    pub fn presence(&self) -> [(&'static str, bool); 108] {
         [
             ("contractType", true),
             ("contractID", self.contract_id.is_some()),
@@ -1345,11 +1374,19 @@ impl ContractTerms {
                 "nextDividendPaymentAmount",
                 self.next_dividend_payment_amount.is_some(),
             ),
+            (
+                "marketObjectCodeOfDividends",
+                self.market_object_code_of_dividends.is_some(),
+            ),
             ("quantity", self.quantity.is_some()),
             ("unit", self.unit.is_some()),
             ("marketValueObserved", self.market_value_observed.is_some()),
             ("currency2", self.currency2.is_some()),
             ("notionalPrincipal2", self.notional_principal2.is_some()),
+            (
+                "nominalInterestRate2",
+                self.nominal_interest_rate2.is_some(),
+            ),
             ("exerciseDate", self.exercise_date.is_some()),
             ("exerciseAmount", self.exercise_amount.is_some()),
             ("optionType", self.option_type.is_some()),
@@ -1743,6 +1780,21 @@ mod tests {
                 "{bad}"
             );
         }
+    }
+
+    /// `nominalInterestRate2` (IPNR2) is a dictionary attribute; the SWPPV
+    /// testbed sets it on all 14 cases.
+    #[test]
+    fn nominal_interest_rate2_round_trips() {
+        let terms: ContractTerms = serde_json::from_value(serde_json::json!({
+            "contractType": "SWPPV",
+            "nominalInterestRate2": "-0.001"
+        }))
+        .expect("terms");
+        assert_eq!(terms.nominal_interest_rate2, Some(Decimal::new(-1, 3)));
+        let wire = serde_json::to_value(&terms).expect("wire");
+        assert_eq!(wire["nominalInterestRate2"], serde_json::json!("-0.001"));
+        assert!(terms.presence().contains(&("nominalInterestRate2", true)));
     }
 
     #[test]

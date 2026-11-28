@@ -1,9 +1,9 @@
 //! Evaluation scaffolding: the dispatch seam between the pure engine and the
 //! per-contract-type implementations (ACTUS techspec section "Contract Types").
 
-use actus_model::{ContractTerms, ContractType};
+use actus_model::{ContractTerms, ContractType, EventType};
 
-use crate::event::{sort_events, ContractEvent};
+use crate::event::{sequence_rank, ContractEvent};
 use crate::risk::RiskFactorProvider;
 use crate::EngineError;
 
@@ -11,8 +11,9 @@ use crate::EngineError;
 ///
 /// Each contract type (PAM, LAM, NAM, ANN, ...) registers an implementation;
 /// [`EngineRegistry::evaluate`] dispatches on the contract type of the terms,
-/// then enforces the deterministic event order via
-/// [`sort_events`](crate::event::sort_events). Implementations must be pure
+/// then enforces the deterministic event order: by time, then by the
+/// engine's [`ContractEngine::sequence_rank`] (a stable sort, like
+/// [`sort_events`](crate::event::sort_events)). Implementations must be pure
 /// functions of `(terms, risk)`: no I/O, no clocks, no randomness.
 pub trait ContractEngine {
     /// The contract type this engine implements.
@@ -24,6 +25,13 @@ pub trait ContractEngine {
         terms: &ContractTerms,
         risk: &dyn RiskFactorProvider,
     ) -> Result<Vec<ContractEvent>, EngineError>;
+
+    /// The same-timestamp sequence rank the registry orders this engine's
+    /// events by: the shared [`sequence_rank`] unless the contract type
+    /// deviates from it (CLM: [`crate::event::call_money_sequence_rank`]).
+    fn sequence_rank(&self, event_type: EventType) -> u8 {
+        sequence_rank(event_type)
+    }
 }
 
 /// Registry of contract type implementations.
@@ -31,7 +39,8 @@ pub trait ContractEngine {
 /// Registration-based dispatch: engines are looked up by
 /// [`ContractEngine::contract_type`], evaluated, and their events sorted.
 /// Evaluation is deterministic because registration order is fixed and the
-/// final event order comes from [`sort_events`], never from iteration order
+/// final event order comes from the stable `(time, sequence rank)` sort,
+/// never from iteration order
 /// of hashed containers.
 #[derive(Default)]
 pub struct EngineRegistry {
@@ -90,7 +99,7 @@ impl EngineRegistry {
         for engine in &self.engines {
             if engine.contract_type() == terms.contract_type {
                 let mut events = engine.evaluate(terms, risk)?;
-                sort_events(&mut events);
+                events.sort_by_key(|e| (e.time, engine.sequence_rank(e.event_type)));
                 return Ok(events);
             }
         }

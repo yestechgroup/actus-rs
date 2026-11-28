@@ -1,47 +1,28 @@
-//! OPTNS: Option (paper §7.15, section 5 "Risk Factor Observer").
+//! OPTNS: Option (techspec "OPTNS: Option"; SI-008).
 //!
-//! A cash-settled European option on an observed underlying market object.
-//! The event stream is:
+//! A cash-settled option on an observed underlying. The event stream, the
+//! underlying observation and the settlement are shared with FUTUR
+//! ([`crate::exercise`]): `PRD` (the premium), `MD`, `XD` fixing the
+//! exercise amount `Xa` at the exercise date, and `STD` paying
+//! `R(CNTRL) x Xa` after the settlement period.
 //!
-//! - `IED` (only when `premiumDiscountAtIED` (`PDIED`) is set): the premium
-//!   is paid by the holder at the initial exchange date, payoff
-//!   `-R(CNTRL) x PDIED` (the premium flows from the option holder to the
-//!   counterparty, mirroring the `IED` premium orientation of PAM).
-//! - `XD` (only when `exerciseDate` (`XD`) is set): the exercise decision at
-//!   `t_XD`, zero payoff. Only European exercise is supported: when
-//!   `optionExerciseType` (`OPXT`) is set to anything other than `E` the
-//!   evaluation reports an invalid transition (American/Bermudan exercise
-//!   windows are out of scope).
-//! - `MD`: the terminal payoff `R(CNTRL) x NT x max(±(S_t - OPS1), 0)` with
-//!   `+` for a call and `-` for a put (`optionType`, `OPTP`); the underlying
-//!   price `S_t` is observed at the exercise date (`XD`, else the maturity)
-//!   via `O_rf(MOC, t)` — the `marketObjectCode` attribute names the
-//!   underlying price series, observed through the *index* namespace of the
-//!   risk factor observer (the same convention the CEC engine uses for
-//!   observed market values).
+//! The exercise amount of the underlying price `S_t` (techspec `STF_XD`):
 //!
-//! Observation fallback: when the provider lacks the observation, the
-//! `exerciseAmount` (`XA`) attribute is used as the terminal payoff if set
-//! (already intrinsic, hence not combined with the strike); otherwise the
-//! evaluation reports `RiskFactorMissing`.
-//!
-//! Contract role sign (dictionary Table 1): the buyer/long roles (`BUY`,
-//! `RPA`, `LG`, `RFL`, `COL`, `CNO`, `UDL`, `UDLP`) carry `+1`; the short
-//! roles (`SEL`, `RPL`, `ST`/`RF`, `PFL`, `UDLM`) carry `-1`.
+//! - call (`OPTP = C`): `max(S_t - OPS1, 0)`;
+//! - put (`OPTP = P`): `max(OPS1 - S_t, 0)`;
+//! - call/put (`OPTP = CP`): `max(S_t - OPS1, 0) + max(OPS2 - S_t, 0)`,
+//!   the call struck at `optionStrike1` and the put at `optionStrike2`.
 
-use chrono::NaiveDateTime;
 use rust_decimal::Decimal;
 
-use actus_model::enums::{OptionExerciseType, OptionType};
-use actus_model::{ContractTerms, ContractType, EventType};
+use actus_model::enums::OptionType;
+use actus_model::{ContractTerms, ContractType};
 
-use crate::common::contract_role_sign;
-use crate::daycount::normalize_timestamp;
 use crate::engine::ContractEngine;
 use crate::event::ContractEvent;
+use crate::exercise::evaluate_exercise;
 use crate::num::ck;
 use crate::risk::RiskFactorProvider;
-use crate::state::{ContractState, ContractStatus};
 use crate::EngineError;
 
 /// Implementation of the OPTNS contract type.
@@ -53,133 +34,37 @@ impl ContractEngine for OptnsEngine {
         ContractType::Optns
     }
 
-    /// Evaluates the premium, exercise and intrinsic-value events.
     fn evaluate(
         &self,
         terms: &ContractTerms,
         risk: &dyn RiskFactorProvider,
     ) -> Result<Vec<ContractEvent>, EngineError> {
-        let sign = contract_role_sign(terms.contract_role);
-        let maturity = terms
-            .maturity_date
-            .or(terms.option_exercise_end_date)
-            .map(normalize_timestamp)
-            .ok_or(EngineError::MissingAttribute("maturityDate"))?;
-        let notional = terms
-            .notional_principal
-            .ok_or(EngineError::MissingAttribute("notionalPrincipal"))?;
-        let strike = terms
-            .option_strike1
-            .ok_or(EngineError::MissingAttribute("optionStrike1"))?;
         let option_type = terms
             .option_type
             .ok_or(EngineError::MissingAttribute("optionType"))?;
-        if let Some(exercise_type) = terms.option_exercise_type {
-            if exercise_type != OptionExerciseType::European {
-                return Err(EngineError::InvalidTransition(format!(
-                    "unsupported optionExerciseType {exercise_type}: only European (E) exercise \
-                     is implemented"
-                )));
+        let strike = terms
+            .option_strike1
+            .ok_or(EngineError::MissingAttribute("optionStrike1"))?;
+        let put_strike = match option_type {
+            OptionType::CallPut => Some(
+                terms
+                    .option_strike2
+                    .ok_or(EngineError::MissingAttribute("optionStrike2"))?,
+            ),
+            OptionType::Call | OptionType::Put => None,
+        };
+        evaluate_exercise(terms, risk, &|price| {
+            let call = (ck(price) - strike).get()?.max(Decimal::ZERO);
+            let put = |strike: Decimal| {
+                Ok::<_, EngineError>((ck(strike) - price).get()?.max(Decimal::ZERO))
+            };
+            match (option_type, put_strike) {
+                (OptionType::Call, _) => Ok(call),
+                (OptionType::Put, _) => put(strike),
+                (OptionType::CallPut, Some(put_strike)) => (ck(call) + put(put_strike)?).get(),
+                (OptionType::CallPut, None) => Err(EngineError::MissingAttribute("optionStrike2")),
             }
-        }
-
-        let mut events = Vec::new();
-        if let Some(premium) = terms.premium_discount_at_ied {
-            let ied = terms
-                .initial_exchange_date
-                .map(normalize_timestamp)
-                .ok_or(EngineError::MissingAttribute("initialExchangeDate"))?;
-            events.push(ContractEvent {
-                event_type: EventType::InitialExchange,
-                time: ied,
-                payoff: (-ck(sign) * premium).get()?,
-                currency: terms.currency.clone(),
-                state: event_state((ck(sign) * premium).get()?, ied, ContractStatus::Active),
-            });
-        }
-
-        let exercise = terms.exercise_date.map(normalize_timestamp);
-        if let Some(xd) = exercise {
-            events.push(ContractEvent {
-                event_type: EventType::Exercise,
-                time: xd,
-                payoff: Decimal::ZERO,
-                currency: terms.currency.clone(),
-                state: event_state(Decimal::ZERO, xd, ContractStatus::Active),
-            });
-        }
-
-        let observation_time = exercise.unwrap_or(maturity);
-        let payoff =
-            match intrinsic_value(terms, risk, option_type, notional, strike, observation_time)? {
-                Some(value) => value,
-                None => {
-                    return Err(EngineError::RiskFactorMissing {
-                        code: terms.market_object_code.clone().unwrap_or_default(),
-                        at: observation_time.to_string(),
-                    })
-                }
-            };
-        events.push(ContractEvent {
-            event_type: EventType::Maturity,
-            time: maturity,
-            payoff: (ck(sign) * payoff).get()?,
-            currency: terms.currency.clone(),
-            state: event_state(Decimal::ZERO, maturity, ContractStatus::Matured),
-        });
-        Ok(events)
-    }
-}
-
-/// The intrinsic value at the observation time.
-///
-/// `Some(NT x max(±(S_t - OPS1), 0))` when the underlying market object is
-/// observed; `Some(XA)` when the provider lacks the observation but the
-/// exercise amount attribute carries the terminal payoff; `None` when
-/// neither is available.
-fn intrinsic_value(
-    terms: &ContractTerms,
-    risk: &dyn RiskFactorProvider,
-    option_type: OptionType,
-    notional: Decimal,
-    strike: Decimal,
-    at: NaiveDateTime,
-) -> Result<Option<Decimal>, EngineError> {
-    if let Some(code) = terms.market_object_code.as_deref() {
-        if let Some(underlying) = risk.index(code, at) {
-            let direction = match option_type {
-                OptionType::Call => Decimal::ONE,
-                OptionType::Put => -Decimal::ONE,
-                OptionType::CallPut => {
-                    let intrinsic = call_put_intrinsic(underlying, strike)?;
-                    return Ok(Some((ck(notional) * intrinsic).get()?));
-                }
-            };
-            let intrinsic = (ck(direction) * (ck(underlying) - strike))
-                .get()?
-                .max(Decimal::ZERO);
-            return Ok(Some((ck(notional) * intrinsic).get()?));
-        }
-    }
-    Ok(terms.exercise_amount)
-}
-
-/// The intrinsic value of a call/put combination: long the call strike and
-/// the put strike (`OPS1`/`OPS2`, dictionary: strike price and put price of
-/// the call/put).
-fn call_put_intrinsic(underlying: Decimal, strike: Decimal) -> Result<Decimal, EngineError> {
-    let call = (ck(underlying) - strike).get()?.max(Decimal::ZERO);
-    let put = (ck(strike) - underlying).get()?.max(Decimal::ZERO);
-    (ck(call) + put).get()
-}
-
-/// Builds a post-event state carrying the given notional at the event time.
-fn event_state(notional: Decimal, time: NaiveDateTime, status: ContractStatus) -> ContractState {
-    ContractState {
-        notional_principal: notional,
-        status_date: time,
-        contract_status: status,
-        ..ContractState::default()
+        })
     }
 }
 
@@ -187,140 +72,231 @@ fn event_state(notional: Decimal, time: NaiveDateTime, status: ContractStatus) -
 mod tests {
     use super::*;
     use crate::risk::StateProvider;
-    use actus_model::ContractRole;
+    use crate::state::ContractStatus;
+    use actus_model::EventType;
+    use chrono::NaiveDateTime;
     use rust_decimal_macros::dec;
     use serde_json::json;
-
-    fn terms(raw: serde_json::Value) -> ContractTerms {
-        serde_json::from_value(raw).expect("terms")
-    }
 
     fn t(s: &str) -> NaiveDateTime {
         NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").expect("timestamp")
     }
 
-    /// The golden option: NT 100, strike 100, ITM call observed at 110.
-    fn call(moc: bool) -> ContractTerms {
+    /// The OPTNS testbed's shape: a European option on AAPL, bought on
+    /// 2020-01-02, with `extra` overriding the terms.
+    fn option(extra: serde_json::Value) -> ContractTerms {
         let mut raw = json!({
             "contractType": "OPTNS",
-            "contractID": "optns01",
-            "contractRole": "RPA",
+            "contractID": "option",
+            "contractRole": "BUY",
             "currency": "USD",
-            "statusDate": "2025-01-01T00:00:00",
-            "maturityDate": "2025-12-31T00:00:00",
-            "notionalPrincipal": "100",
+            "calendar": "NC",
+            "contractDealDate": "2020-01-01T00:00:00",
+            "statusDate": "2020-01-01T00:00:00",
+            "purchaseDate": "2020-01-02T00:00:00",
+            "priceAtPurchaseDate": "10",
+            "maturityDate": "2020-09-30T00:00:00",
+            "optionExerciseType": "E",
             "optionType": "C",
-            "optionStrike1": "100",
-            "exerciseDate": "2025-06-30T00:00:00"
+            "optionStrike1": " 80",
+            "settlementPeriod": "P0D",
+            "deliverySettlement": "S",
+            "contractStructure": [{
+                "object": {"marketObjectCode": "AAPL"},
+                "referenceType": "MOC",
+                "referenceRole": "UDL"
+            }]
         });
-        if moc {
-            raw["marketObjectCode"] = json!("EQ-ABC");
+        for (key, value) in extra.as_object().expect("object") {
+            raw[key] = value.clone();
         }
-        terms(raw)
+        serde_json::from_value(raw).expect("terms")
     }
 
-    fn risk(price: &str) -> StateProvider {
-        StateProvider::new().with_index("EQ-ABC", t("2025-06-30T00:00:00"), price.parse().unwrap())
+    /// AAPL as observed in the OPTNS testbed.
+    fn aapl() -> StateProvider {
+        StateProvider::new()
+            .with_index("AAPL", t("2020-03-30T00:00:00"), dec!(63.70))
+            .with_index("AAPL", t("2020-06-30T00:00:00"), dec!(91.20))
+            .with_index("AAPL", t("2020-09-30T00:00:00"), dec!(115.81))
     }
 
+    fn stream(events: &[ContractEvent]) -> Vec<(EventType, NaiveDateTime, Decimal)> {
+        events
+            .iter()
+            .map(|e| (e.event_type, e.time, e.payoff))
+            .collect()
+    }
+
+    /// option03: the bought call pays `max(115.81 - 80, 0) = 35.81` at `STD`
+    /// after `MD` and `XD` on the maturity date; the premium is `-PPRD`.
     #[test]
-    fn itm_call_pays_intrinsic_value_at_maturity() {
+    fn option03_call_settles_its_exercise_amount() {
         let events = OptnsEngine
-            .evaluate(&call(true), &risk("110"))
+            .evaluate(&option(json!({})), &aapl())
             .expect("events");
-        assert_eq!(events.len(), 2);
-        let xd = &events[0];
-        assert_eq!(xd.event_type, EventType::Exercise);
-        assert_eq!(xd.time, t("2025-06-30T00:00:00"));
-        assert_eq!(xd.payoff, Decimal::ZERO);
-        let md = &events[1];
-        assert_eq!(md.event_type, EventType::Maturity);
-        assert_eq!(md.time, t("2025-12-31T00:00:00"));
-        assert_eq!(md.payoff, dec!(1000));
-        assert_eq!(md.state.contract_status, ContractStatus::Matured);
+        assert_eq!(
+            stream(&events),
+            vec![
+                (EventType::Purchase, t("2020-01-02T00:00:00"), dec!(-10)),
+                (EventType::Maturity, t("2020-09-30T00:00:00"), Decimal::ZERO),
+                (EventType::Exercise, t("2020-09-30T00:00:00"), Decimal::ZERO),
+                (EventType::Settlement, t("2020-09-30T00:00:00"), dec!(35.81)),
+            ]
+        );
+        assert!(events.iter().all(|e| e.state.notional_principal.is_zero()));
+        assert_eq!(
+            events.last().expect("STD").state.contract_status,
+            ContractStatus::Matured
+        );
     }
 
+    /// option04 and option06: the seller receives the premium and pays the
+    /// settlement, which moves by `STP` and the business day convention
+    /// (2020-10-03 is a Saturday; `CSF` settles on Monday).
     #[test]
-    fn itm_put_pays_intrinsic_value() {
-        let mut option = call(true);
-        option.option_type = Some(OptionType::Put);
-        let events = OptnsEngine.evaluate(&option, &risk("90")).expect("events");
-        assert_eq!(events.last().expect("MD").payoff, dec!(1000));
+    fn option06_seller_settles_after_the_shifted_settlement_period() {
+        let terms = option(json!({
+            "contractRole": "SEL",
+            "calendar": "MF",
+            "businessDayConvention": "CSF",
+            "settlementPeriod": "P3D"
+        }));
+        let events = OptnsEngine.evaluate(&terms, &aapl()).expect("events");
+        assert_eq!(events[0].payoff, dec!(10));
+        let std = events.last().expect("STD");
+        assert_eq!(std.event_type, EventType::Settlement);
+        assert_eq!(std.time, t("2020-10-05T00:00:00"));
+        assert_eq!(std.payoff, dec!(-35.81));
     }
 
+    /// option01, option15: an out-of-the-money option still reports `XD`
+    /// and a zero `STD`; the put pays `max(80 - 63.70, 0) = 16.30`.
     #[test]
-    fn seller_orientation_flips_the_payoff() {
-        let mut option = call(true);
-        option.contract_role = Some(ContractRole::Sel);
-        let events = OptnsEngine.evaluate(&option, &risk("110")).expect("events");
-        assert_eq!(events.last().expect("MD").payoff, dec!(-1000));
+    fn option15_put_and_option01_zero_exercise() {
+        let call = option(json!({"maturityDate": "2020-03-30T00:00:00"}));
+        let events = OptnsEngine.evaluate(&call, &aapl()).expect("events");
+        assert_eq!(events.len(), 4);
+        assert_eq!(events[3].payoff, Decimal::ZERO);
+        let put = option(json!({"maturityDate": "2020-03-30T00:00:00", "optionType": "P"}));
+        let events = OptnsEngine.evaluate(&put, &aapl()).expect("events");
+        assert_eq!(events[3].payoff, dec!(16.30));
     }
 
+    /// option13: exercised at the status date with `XA = 10.33`, the option
+    /// only has its settlement left, at `XD + P5D`.
     #[test]
-    fn otm_option_pays_zero() {
+    fn option13_exercised_before_the_status_date_only_settles() {
+        let terms = option(json!({
+            "statusDate": "2020-09-30T00:00:00",
+            "exerciseDate": "2020-09-30T00:00:00",
+            "exerciseAmount": "10.33",
+            "settlementPeriod": "P5D"
+        }));
         let events = OptnsEngine
-            .evaluate(&call(true), &risk("90"))
+            .evaluate(&terms, &StateProvider::new())
             .expect("events");
-        assert_eq!(events.last().expect("MD").payoff, Decimal::ZERO);
+        assert_eq!(
+            stream(&events),
+            vec![(EventType::Settlement, t("2020-10-05T00:00:00"), dec!(10.33))]
+        );
     }
 
+    /// A call/put pays the call struck at `OPS1` plus the put struck at
+    /// `OPS2` (techspec `STF_XD`, `OPTP = CP`): at 115.81 with strikes 100
+    /// and 120, `15.81 + 4.19 = 20`.
     #[test]
-    fn premium_is_paid_at_the_initial_exchange() {
-        let mut option = call(true);
-        option.premium_discount_at_ied = Some(dec!(50));
-        option.initial_exchange_date = Some(t("2025-01-01T00:00:00"));
-        let events = OptnsEngine.evaluate(&option, &risk("110")).expect("events");
-        assert_eq!(events.len(), 3);
-        let ied = &events[0];
-        assert_eq!(ied.event_type, EventType::InitialExchange);
-        assert_eq!(ied.time, t("2025-01-01T00:00:00"));
-        assert_eq!(ied.payoff, dec!(-50));
-    }
-
-    #[test]
-    fn exercise_amount_is_the_terminal_fallback_without_observation() {
-        let mut option = call(false);
-        option.exercise_amount = Some(dec!(250));
-        let events = OptnsEngine
-            .evaluate(&option, &StateProvider::new())
-            .expect("events");
-        assert_eq!(events.last().expect("MD").payoff, dec!(250));
-    }
-
-    #[test]
-    fn unobserved_underlying_without_fallback_is_reported() {
-        let error = OptnsEngine
-            .evaluate(&call(true), &StateProvider::new())
-            .unwrap_err();
-        assert!(matches!(error, EngineError::RiskFactorMissing { .. }));
-    }
-
-    #[test]
-    fn non_european_exercise_is_out_of_scope() {
-        let mut option = call(true);
-        option.option_exercise_type = Some(OptionExerciseType::American);
-        option.cycle_anchor_date_of_optionality = Some(t("2025-01-01T00:00:00"));
-        option.option_exercise_end_date = Some(t("2025-12-31T00:00:00"));
-        let error = OptnsEngine.evaluate(&option, &risk("110")).unwrap_err();
-        assert!(matches!(error, EngineError::InvalidTransition(_)));
-    }
-
-    #[test]
-    fn missing_required_attributes_are_reported() {
-        let error = OptnsEngine
-            .evaluate(
-                &terms(json!({"contractType": "OPTNS", "statusDate": "2025-01-01T00:00:00"})),
-                &risk("110"),
-            )
-            .unwrap_err();
+    fn call_put_uses_both_strikes() {
+        let terms = option(json!({
+            "optionType": "CP",
+            "optionStrike1": "100",
+            "optionStrike2": "120"
+        }));
+        let events = OptnsEngine.evaluate(&terms, &aapl()).expect("events");
+        assert_eq!(events.last().expect("STD").payoff, dec!(20));
+        let mut missing = terms.clone();
+        missing.option_strike2 = None;
         assert!(matches!(
-            error,
-            EngineError::MissingAttribute("maturityDate")
+            OptnsEngine.evaluate(&missing, &aapl()),
+            Err(EngineError::MissingAttribute("optionStrike2"))
         ));
+    }
 
-        let error = OptnsEngine
-            .evaluate(&call(false), &StateProvider::new())
-            .unwrap_err();
-        assert!(matches!(error, EngineError::RiskFactorMissing { .. }));
+    /// A termination before maturity ends the stream with `R(CNTRL) x PTD`.
+    #[test]
+    fn termination_sells_the_option() {
+        let terms = option(json!({
+            "terminationDate": "2020-05-01T00:00:00",
+            "priceAtTerminationDate": "12"
+        }));
+        let events = OptnsEngine.evaluate(&terms, &aapl()).expect("events");
+        assert_eq!(
+            stream(&events),
+            vec![
+                (EventType::Purchase, t("2020-01-02T00:00:00"), dec!(-10)),
+                (EventType::Termination, t("2020-05-01T00:00:00"), dec!(12)),
+            ]
+        );
+        assert_eq!(events[1].state.contract_status, ContractStatus::Terminated);
+    }
+
+    /// The underlying may also be the contract's own `marketObjectCode`;
+    /// without an observation the `exerciseAmount` stands in, and without
+    /// either the missing risk factor is reported.
+    #[test]
+    fn underlying_fallbacks_and_missing_observations() {
+        let mut terms = option(json!({"marketObjectCode": "AAPL"}));
+        terms.contract_structure = None;
+        let events = OptnsEngine.evaluate(&terms, &aapl()).expect("events");
+        assert_eq!(events.last().expect("STD").payoff, dec!(35.81));
+        let mut agreed = terms.clone();
+        agreed.exercise_amount = Some(dec!(7));
+        let events = OptnsEngine
+            .evaluate(&agreed, &StateProvider::new())
+            .expect("events");
+        assert_eq!(events.last().expect("STD").payoff, dec!(7));
+        assert!(matches!(
+            OptnsEngine.evaluate(&terms, &StateProvider::new()),
+            Err(EngineError::RiskFactorMissing { .. })
+        ));
+        terms.market_object_code = None;
+        assert!(matches!(
+            OptnsEngine.evaluate(&terms, &StateProvider::new()),
+            Err(EngineError::MissingAttribute("contractStructure"))
+        ));
+    }
+
+    /// American and Bermudan exercise need observed `XD` events: out of
+    /// scope; missing required attributes are reported.
+    #[test]
+    fn unsupported_and_missing_terms_are_reported() {
+        let american = option(json!({"optionExerciseType": "A"}));
+        assert!(matches!(
+            OptnsEngine.evaluate(&american, &aapl()),
+            Err(EngineError::InvalidTransition(_))
+        ));
+        let empty = ContractTerms::new(ContractType::Optns);
+        assert!(matches!(
+            OptnsEngine.evaluate(&empty, &aapl()),
+            Err(EngineError::MissingAttribute("optionType"))
+        ));
+        let mut no_strike = option(json!({}));
+        no_strike.option_strike1 = None;
+        assert!(matches!(
+            OptnsEngine.evaluate(&no_strike, &aapl()),
+            Err(EngineError::MissingAttribute("optionStrike1"))
+        ));
+        let mut no_maturity = option(json!({}));
+        no_maturity.maturity_date = None;
+        assert!(matches!(
+            OptnsEngine.evaluate(&no_maturity, &aapl()),
+            Err(EngineError::MissingAttribute("maturityDate"))
+        ));
+        let mut no_price = option(json!({}));
+        no_price.price_at_purchase_date = None;
+        assert!(matches!(
+            OptnsEngine.evaluate(&no_price, &aapl()),
+            Err(EngineError::MissingAttribute("priceAtPurchaseDate"))
+        ));
     }
 }

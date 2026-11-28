@@ -2,47 +2,50 @@
 //! Exchange Outright"; dictionary applicability `FXOUT_*`).
 //!
 //! An agreement to exchange two currency amounts: `NT` in `CUR` against
-//! `NT2` in `CUR2`, settled at `MD`. Per the paper the settlement payoff is
+//! `NT2` in `CUR2`, settled at `MD` (techspec "FXOUT: Foreign Exchange
+//! Outright"; SI-007). How depends on `deliverySettlement` (`DS`,
+//! dictionary default `D`):
+//!
+//! - `DS = D` (delivery, the default): both legs settle gross at `MD`, each
+//!   in its own currency: `R(CNTRL) x NT` in `CUR` and
+//!   `R(CNTRL) x (-1) x NT2` in `CUR2` (techspec `STD^(1)`, `STD^(2)`). The
+//!   official testbed reports both as `MD` events (fxout01, fxout07); no fx
+//!   observation is needed.
+//! - `DS = S` (cash): one net `STD` in `CUR` at `MD + settlementPeriod`
+//!   (shifted per `BDC`), valued at the fx rate observed at `MD`:
 //!
 //! ```text
-//! X_CURS_CUR(t) x R(CNTRL) x (NT - O_rf(i, Md_t) x NT2),  i = concat(CUR2, '/', CUR)
+//! X_CURS_CUR(t) x R(CNTRL) x (NT - O_rf(i, Md) x NT2),  i = concat(CUR2, '/', CUR)
 //! ```
 //!
-//! so the holder with `R(CNTRL) = +1` (`RPA`) receives the `CUR` leg net of
-//! the `CUR2` leg converted into `CUR` at the observed rate.
-//!
-//! Conventions implemented here, resolved against the paper and the
-//! evaluation brief:
-//!
-//! - The fx observation `O_rf(i, MD)` is read through the provider's `rate`
-//!   view under the market object code `concat(CUR2, "/", CUR)` (e.g.
-//!   `USD/EUR` for `CUR = EUR`, `CUR2 = USD`).
-//! - Fallback when the provider has no observation: the required attribute
-//!   `exerciseAmount` (`XA`) is interpreted as the agreed settlement amount
-//!   of the second leg expressed in `CUR` terms, so the payoff is
-//!   `sgn x (NT - XA)` — a forward struck away from the market. With
-//!   neither an observation nor `XA` the evaluation reports
+//!   read through the provider's `rate` view (fxout03: `EUR/USD` 1.2612 at
+//!   `MD` 2014-10-30, `STD` 2014-10-31 pays 738.8). Fallback when the
+//!   provider has no observation: the attribute `exerciseAmount` (`XA`)
+//!   as the agreed settlement amount of the second leg in `CUR` terms, so
+//!   the payoff is `sgn x (NT - XA)`; with neither the evaluation reports
 //!   [`EngineError::RiskFactorMissing`] under the concatenated code.
-//! - `IED` is the agreement: the payoff is zero, or
-//!   `-sgn x premiumDiscountAtIED` when `PDIED` is set (not part of the
-//!   FXOUT applicability list but honored when present).
-//! - `PRD`/`TD` are honored with the PAM idiom (both are in the FXOUT
-//!   applicability): a secondary-market purchase pays `-sgn x PPRD` at
-//!   `purchaseDate`, and a set `terminationDate` emits a terminal `TD`
-//!   paying `sgn x PTD`, zeroing the notional state and reporting
-//!   [`ContractStatus::Terminated`] in place of the `MD` settlement.
-//! - `settlementPeriod` (`STP`, dictionary default `P0D`) and the business
-//!   day convention are out of scope: `MD` emits and observes at the raw
-//!   maturity date, which reproduces the default behaviour.
+//!
+//! Other conventions:
+//!
+//! - There is no notional state (techspec states: `Md`, `Prf`, `Sd`; the
+//!   testbed reports `notionalPrincipal` 0).
+//! - `PRD` pays `-sgn x PPRD` at `purchaseDate`; a `terminationDate` before
+//!   `MD` emits a terminal `TD` paying `sgn x PTD` (`POF_TD_STK`) in place of
+//!   the settlement and reports [`ContractStatus::Terminated`]. The testbed's
+//!   fxout10 expects an unsigned `TD` for `RPL`; SI-007 records it as a
+//!   testbed defect.
+//! - `IED` (not in the techspec FXOUT schedule; honoured when set) is the
+//!   agreement: the payoff is zero, or `-sgn x premiumDiscountAtIED`.
 //! - Events at or before the status date `t0` are not observed; without a
 //!   maturity at or after `t0` the stream is empty.
 
 use chrono::NaiveDateTime;
 use rust_decimal::Decimal;
 
-use actus_model::{ContractTerms, ContractType, EventType};
+use actus_model::{ContractTerms, ContractType, DeliverySettlement, EventType};
 
 use crate::common::role_sign;
+use crate::credit_enhancement::settlement_date;
 use crate::daycount::normalize_timestamp;
 use crate::engine::ContractEngine;
 use crate::event::{sequence_rank, ContractEvent};
@@ -61,7 +64,12 @@ enum Kind {
     InitialExchange,
     Purchase,
     Termination,
-    Maturity,
+    /// Gross settlement of the `CUR` leg at `MD` (`DS = D`).
+    FirstLeg,
+    /// Gross settlement of the `CUR2` leg at `MD` (`DS = D`).
+    SecondLeg,
+    /// Net cash settlement in `CUR` at `MD + STP` (`DS = S`).
+    NetSettlement,
 }
 
 impl Kind {
@@ -71,7 +79,10 @@ impl Kind {
             Kind::InitialExchange => EventType::InitialExchange,
             Kind::Purchase => EventType::Purchase,
             Kind::Termination => EventType::Termination,
-            Kind::Maturity => EventType::Maturity,
+            // The techspec names the gross legs STD^(1)/STD^(2); the
+            // official testbed reports them as MD (fxout01, fxout07).
+            Kind::FirstLeg | Kind::SecondLeg => EventType::Maturity,
+            Kind::NetSettlement => EventType::Settlement,
         }
     }
 
@@ -137,18 +148,33 @@ impl ContractEngine for FxoutEngine {
             }
         }
         let terminated = slots.iter().any(|slot| slot.kind == Kind::Termination);
+        let net = terms.delivery_settlement == Some(DeliverySettlement::S);
         if !terminated && maturity > t0 {
-            slots.push(Slot {
-                kind: Kind::Maturity,
-                time: maturity,
-            });
+            if net {
+                slots.push(Slot {
+                    kind: Kind::NetSettlement,
+                    time: settlement_date(terms, maturity)?,
+                });
+            } else {
+                // Inserted in this order; the stable sort keeps CUR first.
+                for kind in [Kind::FirstLeg, Kind::SecondLeg] {
+                    slots.push(Slot {
+                        kind,
+                        time: maturity,
+                    });
+                }
+            }
         }
         slots.sort_by_key(|slot| (slot.time, slot.kind.priority()));
 
+        // FXOUT carries no notional state: the techspec states are `Md`,
+        // `Prf` and `Sd`, and the official testbed reports
+        // `notionalPrincipal` 0 after every event.
         let mut state = ContractState::initial(terms);
-        state.notional_principal = (ck(sgn) * notional).get()?;
         let mut events = Vec::new();
+        let currency2 = terms.currency2.clone();
         for slot in slots {
+            let mut currency = terms.currency.clone();
             let payoff = match slot.kind {
                 Kind::InitialExchange => {
                     (-ck(sgn) * terms.premium_discount_at_ied.unwrap_or(Decimal::ZERO)).get()?
@@ -160,18 +186,29 @@ impl ContractEngine for FxoutEngine {
                     (-ck(sgn) * price).get()?
                 }
                 Kind::Termination => {
+                    // POF_TD_STK = R(CNTRL) x PTD. fxout10 (RPL) expects +100,
+                    // a testbed defect (SI-007): the same function is
+                    // role-signed in stk05 and com04.
                     let price = terms
                         .price_at_termination_date
                         .ok_or(EngineError::MissingAttribute("priceAtTerminationDate"))?;
-                    state.notional_principal = Decimal::ZERO;
                     state.fee_accrued = Decimal::ZERO;
                     state.contract_status = ContractStatus::Terminated;
                     (ck(sgn) * price).get()?
                 }
-                Kind::Maturity => {
+                Kind::FirstLeg => {
+                    state.contract_status = ContractStatus::Matured;
+                    (ck(sgn) * notional).get()?
+                }
+                Kind::SecondLeg => {
+                    currency.clone_from(&currency2);
+                    state.fee_accrued = Decimal::ZERO;
+                    state.contract_status = ContractStatus::Matured;
+                    (-ck(sgn) * notional2).get()?
+                }
+                Kind::NetSettlement => {
                     let rate = settlement_rate(terms, risk, maturity)?;
                     let payoff = (ck(sgn) * (ck(notional) - ck(rate) * notional2)).get()?;
-                    state.notional_principal = Decimal::ZERO;
                     state.fee_accrued = Decimal::ZERO;
                     state.contract_status = ContractStatus::Matured;
                     payoff
@@ -182,7 +219,7 @@ impl ContractEngine for FxoutEngine {
                 event_type: slot.kind.event_type(),
                 time: slot.time,
                 payoff,
-                currency: terms.currency.clone(),
+                currency,
                 state: state.clone(),
             });
         }
@@ -254,7 +291,8 @@ mod tests {
             "notionalPrincipal": "1000000",
             "notionalPrincipal2": "920000",
             "currency": "EUR",
-            "currency2": "USD"
+            "currency2": "USD",
+            "deliverySettlement": "S"
         })
     }
 
@@ -273,11 +311,11 @@ mod tests {
             types,
             vec![
                 (EventType::InitialExchange, t("2016-01-15T00:00:00")),
-                (EventType::Maturity, t("2016-07-15T00:00:00")),
+                (EventType::Settlement, t("2016-07-15T00:00:00")),
             ]
         );
         assert_eq!(events[0].payoff, Decimal::ZERO);
-        assert_eq!(events[0].state.notional_principal, dec!(1000000));
+        assert_eq!(events[0].state.notional_principal, Decimal::ZERO);
         assert_close(events[1].payoff, dec!(6400));
         assert_eq!(events[1].state.notional_principal, Decimal::ZERO);
         assert_eq!(events[1].state.contract_status, ContractStatus::Matured);
@@ -291,7 +329,7 @@ mod tests {
         raw["contractRole"] = json!("RPL");
         let risk = StateProvider::new().with_rate("USD/EUR", t("2016-01-10T00:00:00"), dec!(1.08));
         let events = FxoutEngine.evaluate(&terms(raw), &risk).expect("events");
-        assert_eq!(events[0].state.notional_principal, dec!(-1000000));
+        assert_eq!(events[0].state.notional_principal, Decimal::ZERO);
         assert_close(events[1].payoff, dec!(-6400));
     }
 
@@ -374,5 +412,121 @@ mod tests {
             FxoutEngine.evaluate(&terms(raw), &StateProvider::new()),
             Err(EngineError::MissingAttribute("maturityDate"))
         ));
+    }
+
+    /// fxout08: FXOUT has no notional state (techspec FXOUT states: `Md`,
+    /// `Prf`, `Sd`); the testbed reports `notionalPrincipal` 0 after the
+    /// purchase and the termination.
+    #[test]
+    fn fxout08_has_no_notional_state() {
+        let events = FxoutEngine
+            .evaluate(
+                &terms(json!({
+                    "contractType": "FXOUT",
+                    "contractID": "fxout08",
+                    "contractRole": "RPA",
+                    "currency": "USD",
+                    "currency2": "EUR",
+                    "maturityDate": "2014-12-31T23:59:59",
+                    "notionalPrincipal": "2000",
+                    "notionalPrincipal2": "1000",
+                    "statusDate": "2013-12-30T00:00:00",
+                    "purchaseDate": "2014-04-01T00:00:00",
+                    "priceAtPurchaseDate": "50",
+                    "terminationDate": "2014-09-30T23:59:59",
+                    "priceAtTerminationDate": "100"
+                })),
+                &StateProvider::new(),
+            )
+            .expect("fxout08 evaluates");
+        let got: Vec<(EventType, Decimal, Decimal)> = events
+            .iter()
+            .map(|e| (e.event_type, e.payoff, e.state.notional_principal))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (EventType::Purchase, dec!(-50), Decimal::ZERO),
+                (EventType::Termination, dec!(100), Decimal::ZERO),
+            ]
+        );
+    }
+
+    fn fxout_testbed_terms(role: &str, extra: serde_json::Value) -> serde_json::Value {
+        let mut raw = json!({
+            "contractType": "FXOUT",
+            "contractRole": role,
+            "currency": "USD",
+            "currency2": "EUR",
+            "maturityDate": "2014-12-31T23:59:59",
+            "notionalPrincipal": "2000",
+            "notionalPrincipal2": "1000",
+            "statusDate": "2013-12-30T00:00:00"
+        });
+        for (key, value) in extra.as_object().expect("object") {
+            raw[key] = value.clone();
+        }
+        raw
+    }
+
+    /// fxout01: with `deliverySettlement` unset (dictionary default `D`,
+    /// delivery) both legs settle gross at `MD`, each in its own currency:
+    /// `R(CNTRL) x NT` in `CUR` and `R(CNTRL) x (-1) x NT2` in `CUR2`
+    /// (techspec `STD^(1)`, `STD^(2)`; the testbed names them `MD`). No
+    /// fx observation is needed.
+    #[test]
+    fn fxout01_delivery_settles_both_legs_gross() {
+        let events = FxoutEngine
+            .evaluate(
+                &terms(fxout_testbed_terms("RPA", json!({}))),
+                &StateProvider::new(),
+            )
+            .expect("fxout01 evaluates");
+        let got: Vec<(EventType, NaiveDateTime, Decimal, Option<String>)> = events
+            .iter()
+            .map(|e| (e.event_type, e.time, e.payoff, e.currency.clone()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (
+                    EventType::Maturity,
+                    t("2015-01-01T00:00:00"),
+                    dec!(2000),
+                    Some("USD".into())
+                ),
+                (
+                    EventType::Maturity,
+                    t("2015-01-01T00:00:00"),
+                    dec!(-1000),
+                    Some("EUR".into())
+                ),
+            ]
+        );
+    }
+
+    /// fxout03: `DS = S` settles net in `CUR` at `MD + settlementPeriod`
+    /// (`STD`), at the rate observed at `MD`:
+    /// `R(CNTRL) x (NT - O(CUR2/CUR, MD) x NT2) = 2000 - 1.2612 x 1000`.
+    #[test]
+    fn fxout03_cash_settles_net_after_the_settlement_period() {
+        let raw = fxout_testbed_terms(
+            "RPA",
+            json!({
+                "maturityDate": "2014-10-30T00:00:00",
+                "deliverySettlement": "S",
+                "settlementPeriod": "P1DL0"
+            }),
+        );
+        let risk =
+            StateProvider::new().with_rate("EUR/USD", t("2014-10-30T00:00:00"), dec!(1.2612));
+        let events = FxoutEngine
+            .evaluate(&terms(raw), &risk)
+            .expect("fxout03 evaluates");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, EventType::Settlement);
+        assert_eq!(events[0].time, t("2014-10-31T00:00:00"));
+        assert_eq!(events[0].payoff, dec!(738.8));
+        assert_eq!(events[0].currency.as_deref(), Some("USD"));
     }
 }
