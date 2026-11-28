@@ -93,14 +93,19 @@ tier = "B"
 testbeds = "capfl:4/4"
 
 [CEG]
-tier = "C"
-testbeds = "ceg:0/14"
-issue = 48
+tier = "B"
+testbeds = "ceg:13/14"
+# guarantee14 expects STD = 3508695, the exercise amount plus the accrued fee
+# 80/92 x 10000 truncated to an integer; the engine settles 3508695.65.
+known_defects = "ceg/guarantee14"
+defect_note = "SI-012"
 
 [SWPPV]
-tier = "C"
-testbeds = "swppv:0/14"
-issue = 49
+tier = "B"
+testbeds = "swppv:13/14"
+# swppv13 expects an unsigned TD for PF; the techspec signs POF_TD_STK.
+known_defects = "swppv/swppv13"
+defect_note = "SI-016"
 
 [BCS]
 tier = "none"

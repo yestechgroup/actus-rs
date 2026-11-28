@@ -50,8 +50,8 @@ which CI holds against the testbeds (`tests/verification.rs`):
 | FUTUR | B | `futur` 14/14 | — |  |
 | UMP | B | `ump` 9/9 | — |  |
 | CAPFL | B | `capfl` 4/4 | — |  |
-| CEG | C | `ceg` 0/14 | — | #48 |
-| SWPPV | C | `swppv` 0/14 | — | #49 |
+| CEG | B | `ceg` 13/14 | — | testbed defect: ceg/guarantee14 (SI-012) |
+| SWPPV | B | `swppv` 13/14 | — | testbed defect: swppv/swppv13 (SI-016) |
 | BCS | none | — | — | no engine |
 | CDSWP | none | — | — | no engine |
 | MAR | none | — | — | no engine |

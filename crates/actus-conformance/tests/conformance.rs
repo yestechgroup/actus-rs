@@ -377,7 +377,15 @@ fn fxout_testbed_gate() {
 
 #[test]
 fn swppv_testbed_gate() {
-    gate("swppv", 14, 197, &[]);
+    gate(
+        "swppv",
+        14,
+        197,
+        &[
+            "swppv01", "swppv02", "swppv03", "swppv04", "swppv05", "swppv06", "swppv07", "swppv08",
+            "swppv09", "swppv10", "swppv11", "swppv12", "swppv14",
+        ],
+    );
 }
 
 #[test]
@@ -397,7 +405,26 @@ fn futur_testbed_gate() {
 
 #[test]
 fn ceg_testbed_gate() {
-    gate("ceg", 14, 38, &[]);
+    gate(
+        "ceg",
+        14,
+        38,
+        &[
+            "guarantee01",
+            "guarantee02",
+            "guarantee03",
+            "guarantee04",
+            "guarantee05",
+            "guarantee06",
+            "guarantee07",
+            "guarantee08",
+            "guarantee09",
+            "guarantee10",
+            "guarantee11",
+            "guarantee12",
+            "guarantee13",
+        ],
+    );
 }
 
 #[test]

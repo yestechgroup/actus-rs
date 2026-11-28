@@ -3,37 +3,32 @@
 //! credit-event and child-observer machinery).
 //!
 //! A guarantee covers one or more covered contracts (`CTST^CoveredContract`
-//! references — `COVE`-tagged, else every embedded `CNT` reference) and is
-//! triggered by credit events observed on them. The engine emits two event
-//! groups:
+//! references: `COVE`-tagged, else every embedded `CNT` and every `CID`
+//! reference) and is triggered by credit events observed on them (techspec
+//! "CEG", l. 2541 ff.). The events:
 //!
-//! - **Guarantee notional / protection** (dictionary Table 1 `BUY`/`SEL`,
-//!   `R(CNTRL)`): the guaranteed exposure is
-//!   `CECVR x sum(n_i)` over the covered contracts, with the per-contract
-//!   exposure `n_i` resolved per `CEGE` from the child's own event stream
-//!   (child contract observer): the notional state for `NO`, notional plus
-//!   the interest accrued since the child's last event for `NI`, and the
-//!   child's own market value observation for `MV`. A qualifying observed
-//!   credit event (matching covered contract identifier, contract
-//!   performance equal to `creditEventTypeCovered` `CETC`, default `DF`,
-//!   at or before maturity) emits an `XD` exercise at the observation time
-//!   (zero payoff, `Nt = sgn x exposure` state) and a `STD` settlement at
-//!   the credit event time plus the `settlementPeriod` `STP` (default
-//!   `P0D`), shifted per the business day convention, paying
-//!   `sgn x exposure`. After a settlement the guarantee is terminated (no
-//!   further events).
-//! - **Guarantee fee** (`FP` events on the fee schedule `FEANX`/`FECL`):
-//!   per `FEB`, the nominal basis `N` (default) pays
-//!   `R(CNTRL) x FER x NT x Y` with `Y` the day count fraction between the
-//!   previous and current fee schedule point (the anchor point itself
-//!   accrues zero), and the absolute basis `A` pays `R(CNTRL) x FER`. The
-//!   notional `NT` is re-aggregated from the covered children at every fee
-//!   date, so amortising exposures pay declining fees. Without a trigger,
-//!   the fee schedule runs to maturity and a zero-payoff `MD` closes the
-//!   stream; with a trigger, fees at or before the credit event time remain.
+//! - **Notional** `Nt` (states table): `CECV x sgn x NT` when the guarantee
+//!   sets its own `NT` (the only option for a `CID` reference, which has no
+//!   child to observe), else `CECV x sgn x sum(n_i)` with the per-contract
+//!   exposure `n_i` resolved per `CEGE` from the child's own event stream:
+//!   the notional for `NO`, notional plus accrued interest for `NI`, the
+//!   child's market value observation for `MV`. Every event state reports
+//!   it (`PRD`, `FP`, `XD`).
+//! - **Purchase** `PRD` (schedule "Same as PAM", `POF_PRD_STK`): paying
+//!   `-sgn x PPRD` when `purchaseDate` is after the status date.
+//! - **Fees** `FP` on `FEANX` (else `PRD + FECL`) per `FECL`: `FEB = A`
+//!   pays `sgn x FER`, `FEB = N` (default) pays `Nt x Y x FER`, with `Y`
+//!   from the previous fee point (the anchor accrues zero).
+//! - **Protection**: a qualifying observed credit event (covered contract
+//!   identifier, performance equal to `CETC`, default `DF`, at or before
+//!   maturity) emits an `XD` at the observation time (zero payoff, state
+//!   `Nt`) and a `STD` at the credit event time plus `settlementPeriod`,
+//!   shifted per the business day convention, paying `Xa + Feac`: the
+//!   exercise amount `Nt` plus the fee accrued since the last fee point.
+//!   Fees after the credit event are cut and no `MD` follows. Without a
+//!   trigger a zero-payoff `MD` closes the stream.
 //!
-//! Contract role sign: the protection seller (`SEL`) carries `-1`, every
-//! other role defaults to the buying orientation `+1` (mirroring CEC).
+//! Contract role sign: `common::contract_role_sign` (`SEL` is `-1`).
 
 use chrono::NaiveDateTime;
 use rust_decimal::Decimal;
@@ -56,6 +51,7 @@ use crate::engine::ContractEngine;
 use crate::event::{sort_events, ContractEvent};
 use crate::num::ck;
 use crate::risk::RiskFactorProvider;
+use crate::schedule::cycle_step;
 use crate::state::ContractStatus;
 use crate::EngineError;
 
@@ -85,6 +81,7 @@ impl ContractEngine for CegEngine {
             ));
         }
         let sign = contract_role_sign(terms.contract_role);
+        let coverage = terms.coverage_of_credit_enhancement.unwrap_or(Decimal::ONE);
         let maturity = maturity_date(terms, &covered)?;
         let trigger = credit_event_trigger(
             risk,
@@ -94,45 +91,55 @@ impl ContractEngine for CegEngine {
                 .unwrap_or(CreditEventType::Default),
             maturity,
         );
+        let notional_at =
+            |at: NaiveDateTime| guaranteed_notional(terms, &covered, at, sign, coverage, risk);
 
+        let status_date = terms.status_date.map(normalize_timestamp);
         let mut events = Vec::new();
-        let fee_cutoff = trigger.as_ref().map(|t| t.time).unwrap_or(maturity);
-        for (time, notional, fee) in fee_schedule(terms, &covered, maturity, risk)? {
-            if time > fee_cutoff {
-                continue;
+        if let Some(purchase) = terms.purchase_date {
+            let at = normalize_timestamp(purchase);
+            if status_date.is_none_or(|sd| at > sd) && at <= maturity {
+                let price = terms
+                    .price_at_purchase_date
+                    .ok_or(EngineError::MissingAttribute("priceAtPurchaseDate"))?;
+                events.push(ContractEvent {
+                    event_type: EventType::Purchase,
+                    time: purchase,
+                    payoff: (ck(sign) * Decimal::NEGATIVE_ONE * price).get()?,
+                    currency: terms.currency.clone(),
+                    state: event_state(notional_at(at)?, at),
+                });
             }
+        }
+
+        let fee_cutoff = trigger.as_ref().map(|t| t.time).unwrap_or(maturity);
+        let fees = fee_schedule(terms, maturity, sign, &notional_at)?;
+        for fee in fees.iter().filter(|fee| fee.emit <= fee_cutoff) {
             events.push(ContractEvent {
                 event_type: EventType::FeePayment,
-                time,
-                payoff: (ck(sign) * fee).get()?,
+                time: fee.emit,
+                payoff: fee.payoff,
                 currency: terms.currency.clone(),
-                state: event_state((ck(sign) * notional).get()?, time),
+                state: event_state(fee.notional, fee.emit),
             });
         }
 
         match trigger {
             Some(credit_event) => {
-                let coverage = terms.coverage_of_credit_enhancement.unwrap_or(Decimal::ONE);
-                let exposure = (ck(coverage)
-                    * covered_exposure(
-                        &covered,
-                        credit_event.time,
-                        terms.guaranteed_exposure,
-                        risk,
-                    )?)
-                .get()?;
+                let exercise_amount = notional_at(credit_event.time)?;
+                let accrued_fee = fee_accrued(terms, &fees, credit_event.time, sign)?;
                 let settlement_time = settlement_date(terms, credit_event.time)?;
                 events.push(ContractEvent {
                     event_type: EventType::Exercise,
                     time: credit_event.time,
                     payoff: Decimal::ZERO,
                     currency: terms.currency.clone(),
-                    state: event_state((ck(sign) * exposure).get()?, credit_event.time),
+                    state: event_state(exercise_amount, credit_event.time),
                 });
                 events.push(ContractEvent {
                     event_type: EventType::Settlement,
                     time: settlement_time,
-                    payoff: (ck(sign) * exposure).get()?,
+                    payoff: (ck(exercise_amount) + accrued_fee).get()?,
                     currency: terms.currency.clone(),
                     state: terminal_state(
                         Decimal::ZERO,
@@ -156,8 +163,29 @@ impl ContractEngine for CegEngine {
     }
 }
 
+/// The guaranteed notional `Nt` at `at` (techspec CEG states table):
+/// `CECV x sgn x NT` when the guarantee sets its own notional, else
+/// `CECV x sgn x sum(n_i)` over the covered contracts.
+///
+/// A guarantee that references its covered contract only by identifier
+/// (`CID`) has no child to observe, so it needs `NT` (guarantee01-08).
+fn guaranteed_notional(
+    terms: &ContractTerms,
+    covered: &[&ContractReference],
+    at: NaiveDateTime,
+    sign: Decimal,
+    coverage: Decimal,
+    risk: &dyn RiskFactorProvider,
+) -> Result<Decimal, EngineError> {
+    let exposure = match terms.notional_principal {
+        Some(notional) => notional,
+        None => covered_exposure(covered, at, terms.guaranteed_exposure, risk)?,
+    };
+    (ck(coverage) * sign * exposure).get()
+}
+
 /// The covered contract references: `COVE`-tagged entries, else every
-/// embedded `CNT` reference.
+/// embedded `CNT` reference and every `CID` reference.
 fn covered_contracts(structure: &[ContractReference]) -> Vec<&ContractReference> {
     let tagged: Vec<&ContractReference> = structure
         .iter()
@@ -169,62 +197,128 @@ fn covered_contracts(structure: &[ContractReference]) -> Vec<&ContractReference>
     structure
         .iter()
         .filter(|r| {
-            r.reference_type == Some(ContractReferenceType::Contract)
-                && r.embedded_contract().is_some()
+            (r.reference_type == Some(ContractReferenceType::Contract)
+                && r.embedded_contract().is_some())
+                || r.reference_type == Some(ContractReferenceType::ContractIdentifier)
         })
         .collect()
 }
 
-/// The fee schedule `(emission time, guaranteed notional, fee amount)`
-/// triplets (techspec `FP`: `R(CNTRL) x FER x NT x Y` per `FEB`).
+/// One point of the fee schedule.
+struct Fee {
+    /// The calculation time of the schedule point.
+    calc: NaiveDateTime,
+    /// The emission time (business day shifted).
+    emit: NaiveDateTime,
+    /// The guaranteed notional `Nt` at the point.
+    notional: Decimal,
+    /// The `FP` payoff.
+    payoff: Decimal,
+}
+
+/// The fee schedule (techspec CEG `FP`).
 ///
-/// The schedule unrolls from `FEANX` per `FECL` to maturity; `Y` is the day
-/// count fraction from the previous schedule point (the anchor accrues
-/// zero), and the notional is re-aggregated from the covered children at
-/// every fee date. `FEB = A` pays the absolute `FER`; `FEB = N` (default)
-/// pays `FER x NT x Y`.
+/// The schedule unrolls from `FEANX` (else `PRD + FECL`) per `FECL` to
+/// maturity. `FEB = A` pays `sgn x FER`; `FEB = N` (default) pays
+/// `Nt x Y x FER`, with `Y` the day count fraction from the previous
+/// schedule point (the anchor accrues zero) and `Nt` the signed, covered
+/// notional at the fee date.
 fn fee_schedule(
     terms: &ContractTerms,
-    covered: &[&ContractReference],
     maturity: NaiveDateTime,
-    risk: &dyn RiskFactorProvider,
-) -> Result<Vec<(NaiveDateTime, Decimal, Decimal)>, EngineError> {
+    sign: Decimal,
+    notional_at: &dyn Fn(NaiveDateTime) -> Result<Decimal, EngineError>,
+) -> Result<Vec<Fee>, EngineError> {
     let fee_rate = match terms.fee_rate {
-        Some(rate) => rate,
-        None => return Ok(Vec::new()),
-    };
-    let (anchor, cycle) = match (
-        terms.cycle_anchor_date_of_fee.map(normalize_timestamp),
-        terms.cycle_of_fee.as_ref(),
-    ) {
-        (Some(anchor), Some(cycle)) => (anchor, cycle),
+        Some(rate) if !rate.is_zero() => rate,
         _ => return Ok(Vec::new()),
+    };
+    let Some(cycle) = terms.cycle_of_fee.as_ref() else {
+        return Ok(Vec::new());
     };
     let eomc = terms
         .end_of_month_convention
         .unwrap_or(EndOfMonthConvention::Sd);
+    let anchor = match (terms.cycle_anchor_date_of_fee, terms.purchase_date) {
+        (Some(anchor), _) => normalize_timestamp(anchor),
+        (None, Some(purchase)) => cycle_step(normalize_timestamp(purchase), 1, cycle, eomc)?,
+        (None, None) => return Ok(Vec::new()),
+    };
     let bdc = terms
         .business_day_convention
         .unwrap_or(BusinessDayConvention::Nos);
     let cal = terms.calendar.unwrap_or(Calendar::Nc);
-    let dcc = terms
-        .day_count_convention
-        .unwrap_or(DayCountConvention::A365);
-    let basis = terms.fee_basis;
+    let dcc = fee_day_count(terms);
 
     let mut schedule = Vec::new();
     let mut previous = anchor;
     for (calc, emit) in stub_series(anchor, cycle, maturity, eomc, bdc, cal)? {
-        let notional = covered_exposure(covered, emit, terms.guaranteed_exposure, risk)?;
-        let year_fraction = day_count_fraction(previous, calc, dcc)?;
-        let fee = match basis {
-            Some(FeeBasis::AbsoluteValue) => fee_rate,
-            _ => (ck(fee_rate) * notional * year_fraction).get()?,
+        let notional = notional_at(emit)?;
+        let payoff = match terms.fee_basis {
+            Some(FeeBasis::AbsoluteValue) => (ck(sign) * fee_rate).get()?,
+            _ => (ck(notional) * fee_rate * day_count_fraction(previous, calc, dcc)?).get()?,
         };
-        schedule.push((emit, notional, fee));
+        schedule.push(Fee {
+            calc,
+            emit,
+            notional,
+            payoff,
+        });
         previous = calc;
     }
     Ok(schedule)
+}
+
+/// The fee day count convention (dictionary default `A365`).
+fn fee_day_count(terms: &ContractTerms) -> DayCountConvention {
+    terms
+        .day_count_convention
+        .unwrap_or(DayCountConvention::A365)
+}
+
+/// The fee accrued `Feac` at the exercise time `at` (techspec CEG `XD`
+/// state transition), settled with the protection in `STD`.
+///
+/// With `tFP-` the last fee point before `at` and `tFP+` one regular fee
+/// cycle after it,
+/// `FEB = A` accrues `Y(tFP-, at) / Y(tFP-, tFP+) x sgn x FER` and
+/// `FEB = N` accrues `Y(tFP-, at) x Nt(tFP-) x FER`. Before the first fee
+/// point nothing has accrued.
+fn fee_accrued(
+    terms: &ContractTerms,
+    fees: &[Fee],
+    at: NaiveDateTime,
+    sign: Decimal,
+) -> Result<Decimal, EngineError> {
+    let Some(fee_rate) = terms.fee_rate else {
+        return Ok(Decimal::ZERO);
+    };
+    let Some(previous) = fees.iter().rev().find(|fee| fee.calc < at) else {
+        return Ok(Decimal::ZERO);
+    };
+    let dcc = fee_day_count(terms);
+    let elapsed = day_count_fraction(previous.calc, at, dcc)?;
+    match terms.fee_basis {
+        Some(FeeBasis::AbsoluteValue) => {
+            // The fee period the exercise falls in is the regular cycle
+            // period after `tFP-`: a long last stub merges the final roll
+            // into the stub, but guarantee14 accrues over the regular
+            // quarter (80/92 of `FER`, not 80/183).
+            let Some(cycle) = terms.cycle_of_fee.as_ref() else {
+                return Ok(Decimal::ZERO);
+            };
+            let eomc = terms
+                .end_of_month_convention
+                .unwrap_or(EndOfMonthConvention::Sd);
+            let next = cycle_step(previous.calc, 1, cycle, eomc)?;
+            let period = day_count_fraction(previous.calc, next, dcc)?;
+            if period.is_zero() {
+                return Ok(Decimal::ZERO);
+            }
+            (ck(elapsed) / period * sign * fee_rate).get()
+        }
+        _ => (ck(elapsed) * previous.notional * fee_rate).get(),
+    }
 }
 
 #[cfg(test)]
@@ -301,6 +395,13 @@ mod tests {
         }))
     }
 
+    /// The fee accrued from the July fee date to the 2025-09-20 credit
+    /// event on the guaranteed notional `nt`: `0.005 x nt x 79/360`
+    /// (30E360), settled with the protection.
+    fn accrued_fee(nt: Decimal) -> Decimal {
+        dec!(0.005) * nt * dec!(79) / dec!(360)
+    }
+
     fn risk_with(events: &[ObservedCreditEvent]) -> StateProvider {
         let mut risk = StateProvider::new();
         for event in events {
@@ -367,7 +468,7 @@ mod tests {
             .find(|e| e.event_type == EventType::Settlement)
             .expect("STD");
         assert_eq!(std.time, t("2025-09-20T00:00:00"));
-        assert_eq!(std.payoff, dec!(2000000));
+        close(std.payoff, dec!(2000000) + accrued_fee(dec!(2000000)));
         assert_eq!(std.state.contract_status, ContractStatus::Terminated);
         // Fees at or before the trigger only; no maturity event.
         let fee_times: Vec<NaiveDateTime> = events
@@ -400,10 +501,13 @@ mod tests {
             .iter()
             .find(|e| e.event_type == EventType::Settlement)
             .expect("STD");
-        // 2M plus 2 x 0.03 x (79/360) x 1M accrued since the July IP.
+        // 2M plus 2 x 0.03 x (79/360) x 1M accrued since the July IP, plus
+        // the fee accrued on the 2M notional of the July fee date.
         close(
             std.payoff,
-            dec!(2000000) + dec!(2) * dec!(0.03) * dec!(79) / dec!(360) * dec!(1000000),
+            dec!(2000000)
+                + dec!(2) * dec!(0.03) * dec!(79) / dec!(360) * dec!(1000000)
+                + accrued_fee(dec!(2000000)),
         );
     }
 
@@ -426,7 +530,7 @@ mod tests {
             .iter()
             .find(|e| e.event_type == EventType::Settlement)
             .expect("STD");
-        assert_eq!(std.payoff, dec!(-2000000));
+        close(std.payoff, dec!(-2000000) - accrued_fee(dec!(2000000)));
     }
 
     #[test]
@@ -443,7 +547,7 @@ mod tests {
             .iter()
             .find(|e| e.event_type == EventType::Settlement)
             .expect("STD");
-        assert_eq!(std.payoff, dec!(1000000));
+        close(std.payoff, dec!(1000000) + accrued_fee(dec!(1000000)));
     }
 
     #[test]
@@ -502,7 +606,76 @@ mod tests {
             .iter()
             .find(|e| e.event_type == EventType::Settlement)
             .expect("STD");
-        assert_eq!(std.payoff, dec!(2000000));
+        close(std.payoff, dec!(2000000) + accrued_fee(dec!(2000000)));
+    }
+
+    /// A guarantee that names its covered contract by identifier (`CID`)
+    /// guarantees its own `NT`, scaled by the coverage and role signed
+    /// (guarantee06, guarantee08); the purchase settles at `PRD`.
+    #[test]
+    fn identifier_references_guarantee_the_own_notional() {
+        let guarantee = terms(json!({
+            "contractType": "CEG",
+            "contractID": "ceg-cid",
+            "contractRole": "SEL",
+            "currency": "USD",
+            "statusDate": "2020-01-01T00:00:00",
+            "purchaseDate": "2020-01-02T00:00:00",
+            "priceAtPurchaseDate": "10",
+            "maturityDate": "2020-12-31T00:00:00",
+            "notionalPrincipal": "1000000",
+            "coverageOfCreditEnhancement": "0.7",
+            "creditEventTypeCovered": "DF",
+            "contractStructure": [{
+                "object": {"contractIdentifier": "US91282XYZ01"},
+                "referenceType": "CID",
+                "referenceRole": "COVE"
+            }]
+        }));
+        let risk = risk_with(&[ObservedCreditEvent {
+            time: t("2020-09-20T00:00:00"),
+            contract_id: Some("US91282XYZ01".to_string()),
+            performance: Some(ContractPerformance::Default),
+        }]);
+        let events = CegEngine.evaluate(&guarantee, &risk).expect("events");
+        let summary: Vec<(EventType, Decimal, Decimal)> = events
+            .iter()
+            .map(|e| (e.event_type, e.payoff, e.state.notional_principal))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                (EventType::Purchase, dec!(10), dec!(-700000)),
+                (EventType::Exercise, Decimal::ZERO, dec!(-700000)),
+                (EventType::Settlement, dec!(-700000), Decimal::ZERO),
+            ]
+        );
+
+        // Without a matching credit event the guarantee matures.
+        let events = CegEngine
+            .evaluate(&guarantee, &risk_with(&[]))
+            .expect("events");
+        assert_eq!(
+            events.iter().map(|e| e.event_type).collect::<Vec<_>>(),
+            vec![EventType::Purchase, EventType::Maturity]
+        );
+    }
+
+    /// The fee states carry the covered notional (guarantee14: coverage
+    /// 0.5 over 11M reports 5.5M).
+    #[test]
+    fn fee_states_carry_the_coverage() {
+        let mut guarantee = golden();
+        guarantee.coverage_of_credit_enhancement = Some(dec!(0.5));
+        let events = CegEngine
+            .evaluate(&guarantee, &risk_with(&[]))
+            .expect("events");
+        let fee = events
+            .iter()
+            .find(|e| e.event_type == EventType::FeePayment && e.time == t("2025-04-01T00:00:00"))
+            .expect("fee");
+        assert_eq!(fee.state.notional_principal, dec!(1000000));
+        assert_eq!(fee.payoff, dec!(1250));
     }
 
     #[test]

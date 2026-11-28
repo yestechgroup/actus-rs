@@ -52,7 +52,7 @@ fn type_descriptions(
         ("STK", ("Stock", "Equity instrument with optional periodic dividend payments.", "Represents ownership in an entity. Payoffs are driven by market observations (stock price). Supports fixed dividends (DVNP) and variable dividends based on market rates.", vec!["IED", "DV"])),
         ("COM", ("Commodity", "Physical or synthetic commodity holding with market-driven valuation.", "Represents holdings in commodities (oil, metals, agricultural products). Similar to STK but for physical assets. Value is driven by market observations of the commodity price.", vec!["IED"])),
         ("FXOUT", ("FX Outright", "Foreign exchange transaction exchanging two currencies at a future date at a predetermined rate.", "An outright FX forward contract. At STD (settlement date), one currency is exchanged for another at an agreed rate. Payoff depends on the difference between contract rate and market rate at settlement.", vec!["IED", "STD"])),
-        ("SWPPV", ("Plain Vanilla Swap", "Interest rate swap exchanging fixed-rate payments for floating-rate payments.", "The most common interest rate derivative. One party pays fixed rate (IPNR), the other pays floating rate (observed via RRMO). Net settlement occurs at each IP date. Used for hedging interest rate risk.", vec!["IED", "IP", "MD"])),
+        ("SWPPV", ("Plain Vanilla Swap", "Interest rate swap exchanging fixed-rate payments for floating-rate payments.", "The most common interest rate derivative. One party pays fixed rate (IPNR), the other pays floating rate (starting at IPNR2, reset via RRMO). Physical delivery pays each leg separately (IPFX, IPFL); cash settlement pays one net IP. Used for hedging interest rate risk.", vec!["IED", "IPFX", "IPFL", "RR", "MD"])),
         ("CAPFL", ("Cap-Floor", "Interest rate option that pays when reference rate exceeds a cap or falls below a floor.", "Combines a cap (upper rate limit RRLC) and floor (lower rate limit RRLF) on an underlying interest rate contract. Payoff is the absolute difference between the capped/floored and uncapped cash flows.", vec!["IED", "IP", "MD"])),
         ("OPTNS", ("Option", "Right but not obligation to buy (call) or sell (put) an underlying at a specified strike price.", "Standard option contract. At exercise date (XD), holder can exercise if in-the-money. Call options (OPTP=C) profit when St > OPS1 (strike). Put options (OPTP=P) profit when St < OPS1. Payoff is max(\u{b1}(St-OPS1), 0).", vec!["IED", "XD", "MD"])),
         ("FUTUR", ("Future", "Obligation to buy or sell an underlying at a predetermined forward price at a future date.", "Futures contract with payoff St - PFUT at maturity, where St is the spot price and PFUT is the forward price. Unlike options, futures create an obligation for both parties.", vec!["IED", "MD"])),
@@ -201,7 +201,7 @@ pub fn event_view(event: &EventDto, index: usize, total: usize, min: i64, range:
 pub fn event_kind(event_type: &str) -> &'static str {
     match event_type {
         "IED" => "ied",
-        "IP" | "IPCI" => "ip",
+        "IP" | "IPCI" | "IPFX" | "IPFL" => "ip",
         "PR" | "PP" | "PY" | "PI" => "pr",
         "MD" => "md",
         _ => "other",
